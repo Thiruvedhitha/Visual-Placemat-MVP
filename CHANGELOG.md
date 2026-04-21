@@ -1,5 +1,68 @@
 # Changelog
 
+## [0.1.2] — 2026-04-21
+
+### Upload Page — UX Refinements, File Preview & Format Validation
+
+#### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/app/(routes)/documents/page.tsx` | Multiple UX improvements (see below) |
+| `package.json` / `package-lock.json` | Added `xlsx` (SheetJS) dependency |
+
+#### Changes
+
+- **Step progress bar removed** — Eliminated the `1 › 2 › 3…` wizard nav bar and the "Step 2 of 6" badge; page flows directly from the site Navbar into upload content
+- **SheetJS parsing** — Uploaded `.xlsx`/`.csv` is parsed entirely in the browser using `XLSX.read` + `sheet_to_json`; no server upload occurs
+- **File info bar** — After selecting a file, the drop zone is replaced by a bar showing filename, file size, and detected row count with **Replace** and **Remove** buttons
+- **Smart preview table** — Shows only the first occurrence of each non-leaf L-level (L0, L1, L2…) plus up to 10 leaf-level rows; table headers auto-colour by L-column depth; footer note reads _"Showing first entry per parent level"_
+- **Format validation banner** — After parsing, headers are checked for at least one `L0/L1/L2…` column:
+  - ✅ Green banner: _"Format matched — detected columns: L0, L1, L2, L3 + Description"_
+  - ❌ Red banner: _"Format mismatch — No L-level columns found…"_
+- **"Continue to Canvas →"** button is disabled until a file is loaded **and** format validation passes
+- **Expected column format** — Sample table hidden once a file is loaded to reduce visual noise
+
+---
+
+## [0.1.1] — 2026-04-21
+
+### Upload Excel Page — New Route & Navigation Wiring
+
+#### What was built
+
+A dedicated **Step 2 — Upload Excel** page at `/documents`, matching the 6-step wizard UI. Landing page entry cards now navigate to their respective routes instead of being non-interactive buttons.
+
+---
+
+#### Files Created / Modified
+
+| File | Change |
+|------|--------|
+| `src/app/(routes)/documents/page.tsx` | **Created** — Full upload wizard page (step 2 of 6) |
+| `src/components/ui/EntryCards.tsx` | **Modified** — Cards converted from `<button>` to `<Link>` with route targets |
+
+---
+
+#### Page: `/documents` (`src/app/(routes)/documents/page.tsx`)
+
+- **Step progress bar** — shows all 6 steps; step 2 highlighted in blue
+- **Dark navbar** — "DiagramAI" logo, "New diagram" button, "STEP 2 OF 6" label, "Cancel" link (returns to `/`)
+- **Drag-and-drop file zone** — accepts `.xlsx` and `.csv`; shows success state with green check when a file is selected; "Browse files" button triggers native file picker
+- **Expected column format table** — visual preview of L0 → L1 → L2 → L3 → Description columns with matching color gradient
+- **Bottom step description** — explains SheetJS browser-side parsing (no server upload)
+- **Pagination controls** — ← Previous (links to `/`), `2 / 6` counter, Next → (enabled only after a file is selected)
+
+#### EntryCards Navigation (`src/components/ui/EntryCards.tsx`)
+
+- Added `import Link from "next/link"` and `href` property to each card definition
+- "Upload Excel / CSV" → `/documents`
+- "Use a template" → `/transform`
+- "Start with AI prompt" → `/dashboard`
+- Replaced `<button>` wrapper with `<Link>` — all hover animations and styling preserved
+
+---
+
 ## [0.1.0] — 2026-04-20
 
 ### Landing Page — Full Implementation

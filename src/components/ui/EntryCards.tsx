@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
 const cards = [
   {
     id: "upload",
     title: "Upload Excel / CSV",
     subtitle: "L0–L3 columns → auto diagram",
+    href: "/documents",
     accent: true,
     icon: (
       <svg className="h-8 w-8" viewBox="0 0 48 48" fill="none">
@@ -20,6 +22,7 @@ const cards = [
     id: "template",
     title: "Use a template",
     subtitle: "Capability map, org chart…",
+    href: "/transform",
     accent: false,
     icon: (
       <svg className="h-8 w-8 text-slate-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -31,6 +34,7 @@ const cards = [
     id: "ai-prompt",
     title: "Start with AI prompt",
     subtitle: "Describe your diagram",
+    href: "/dashboard",
     accent: false,
     icon: (
       <svg className="h-8 w-8 text-slate-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -48,13 +52,14 @@ export default function EntryCards() {
       {cards.map((card) => {
         const isHovered = hoveredId === card.id;
         return (
-          <button
+          <Link
             key={card.id}
+            href={card.href}
             onMouseEnter={() => setHoveredId(card.id)}
             onMouseLeave={() => setHoveredId(null)}
             className={`
               group relative flex flex-col items-center gap-3 rounded-2xl border-2 bg-white px-5 py-8 shadow-md
-              transition-all duration-200 ease-out
+              transition-all duration-200 ease-out cursor-pointer
               ${card.accent
                 ? "border-dashed border-brand-400 ring-1 ring-brand-200 hover:border-brand-500 hover:shadow-lg"
                 : "border-transparent hover:border-brand-200 hover:shadow-lg"
@@ -79,7 +84,7 @@ export default function EntryCards() {
             >
               <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
             </svg>
-          </button>
+          </Link>
         );
       })}
     </div>

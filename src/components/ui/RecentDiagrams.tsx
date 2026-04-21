@@ -10,7 +10,7 @@ export default function RecentDiagrams() {
   return (
     <section className="w-full">
       <h2 className="mb-4 text-lg font-semibold text-slate-700">
-        Recent diagrams
+        Recent Works
       </h2>
 
       <div className="flex flex-wrap gap-3">
