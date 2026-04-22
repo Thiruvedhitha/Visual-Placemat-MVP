@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import * as XLSX from "xlsx";
 
@@ -16,6 +17,7 @@ const SAMPLE_COLUMNS = [
 type ParsedRow = Record<string, string>;
 
 export default function DocumentsUploadPage() {
+  const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -24,6 +26,30 @@ export default function DocumentsUploadPage() {
   const [parseError, setParseError]         = useState<string | null>(null);
   const [formatValid, setFormatValid]       = useState<boolean | null>(null);
   const [formatMessage, setFormatMessage]   = useState<string>("");
+  const [saving, setSaving]                 = useState(false);
+  const [saveError, setSaveError]           = useState<string | null>(null);
+
+  const handleContinue = async () => {
+    if (!uploadedFile) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", uploadedFile);
+      const res = await fetch("/api/documents", { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) {
+        setSaveError(data.error || "Upload failed");
+        return;
+      }
+      // Saved — navigate to canvas
+      router.push(`/dashboard?catalogId=${data.catalogId}`);
+    } catch {
+      setSaveError("Network error. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   // Validate that the headers contain at least one L-column and optionally a Description column
   const validateFormat = (headers: string[]) => {
@@ -319,16 +345,32 @@ export default function DocumentsUploadPage() {
       <footer className="border-t border-slate-200 bg-white px-4 py-5 sm:px-6">
         <div className="mx-auto flex max-w-5xl items-center justify-between">
           <Link href="/" className="text-sm font-medium text-slate-500 transition hover:text-slate-800">← Previous</Link>
-          <button
-            disabled={!uploadedFile || previewRows.length === 0 || formatValid !== true}
-            className={`rounded-xl px-6 py-2.5 text-sm font-semibold transition ${
-              uploadedFile && previewRows.length > 0 && formatValid === true
-                ? "bg-brand-600 text-white shadow-sm hover:bg-brand-700 hover:shadow-md active:scale-95"
-                : "cursor-not-allowed bg-slate-100 text-slate-300"
-            }`}
-          >
-            Continue to Canvas →
-          </button>
+          <div className="flex items-center gap-3">
+            {saveError && (
+              <p className="text-xs text-red-500">{saveError}</p>
+            )}
+            <button
+              onClick={handleContinue}
+              disabled={!uploadedFile || previewRows.length === 0 || formatValid !== true || saving}
+              className={`rounded-xl px-6 py-2.5 text-sm font-semibold transition ${
+                uploadedFile && previewRows.length > 0 && formatValid === true && !saving
+                  ? "bg-brand-600 text-white shadow-sm hover:bg-brand-700 hover:shadow-md active:scale-95"
+                  : "cursor-not-allowed bg-slate-100 text-slate-300"
+              }`}
+            >
+              {saving ? (
+                <span className="flex items-center gap-2">
+                  <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Saving…
+                </span>
+              ) : (
+                "Continue to Canvas →"
+              )}
+            </button>
+          </div>
         </div>
       </footer>
     </div>
