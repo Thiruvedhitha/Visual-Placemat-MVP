@@ -1,0 +1,496 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+.wrap{padding:.5rem 0 1.5rem;}
+.tabs{display:flex;gap:5px;margin-bottom:1.2rem;border-bottom:0.5px solid var(--color-border-tertiary);padding-bottom:10px;flex-wrap:wrap;}
+.tb{font-size:11px;padding:6px 13px;border-radius:20px;border:0.5px solid var(--color-border-secondary);background:var(--color-background-primary);color:var(--color-text-secondary);cursor:pointer;transition:all 0.15s;}
+.tb.on{background:#1A56DB;color:#fff;border-color:#1A56DB;font-weight:500;}
+.pane{display:none;animation:fi .15s ease;}.pane.on{display:block;}
+@keyframes fi{from{opacity:0}to{opacity:1}}
+.card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:12px;padding:12px 14px;margin-bottom:10px;}
+.card.g{border-left:3px solid #059669;}
+.card.a{border-left:3px solid #B45309;}
+.card.b{border-left:3px solid #2563EB;}
+.heading{font-size:15px;font-weight:500;color:var(--color-text-primary);margin-bottom:6px;}
+.sub{font-size:11px;font-weight:600;color:var(--color-text-secondary);margin:10px 0 6px;text-transform:uppercase;letter-spacing:.05em;}
+.sub:first-child{margin-top:0;}
+.r{display:flex;gap:8px;font-size:12px;color:var(--color-text-secondary);line-height:1.65;margin-bottom:5px;align-items:flex-start;}
+.d{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:4px;}
+.dg{background:#059669;}.da{background:#B45309;}.db{background:#2563EB;}.dp{background:#7C3AED;}
+.code{background:var(--color-background-secondary);border-radius:8px;padding:10px 13px;font-size:11px;font-family:var(--font-mono);color:var(--color-text-primary);line-height:1.8;margin:8px 0;white-space:pre-wrap;word-break:break-word;}
+.tag{font-size:10px;padding:2px 8px;border-radius:10px;display:inline-block;margin:3px 2px 0 0;font-weight:500;}
+.tg{background:var(--color-background-success);color:var(--color-text-success);}
+.ta{background:var(--color-background-warning);color:var(--color-text-warning);}
+.tb2{background:var(--color-background-info);color:var(--color-text-info);}
+.tp{background:#F5F3FF;color:#6D28D9;}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.trow{display:grid;grid-template-columns:170px 150px 1fr;gap:8px;padding:7px 0;border-bottom:0.5px solid var(--color-border-tertiary);font-size:12px;align-items:start;}
+.trow:last-child{border-bottom:none;}
+.thdr{font-weight:600;font-size:10px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.05em;}
+.fname{font-family:var(--font-mono);font-size:11px;color:var(--color-text-primary);}
+.ftype{font-family:var(--font-mono);font-size:11px;color:var(--color-text-secondary);}
+.fnote{font-size:11px;color:var(--color-text-secondary);line-height:1.5;}
+.badge{font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;margin-left:5px;vertical-align:middle;}
+.badge-mod{background:#FEF9C3;color:#854D0E;}
+.badge-keep{background:#DCFCE7;color:#166534;}
+.badge-skip{background:#F3F4F6;color:#6B7280;}
+.verdict{border-radius:8px;padding:10px 13px;font-size:12px;line-height:1.7;margin-top:8px;}
+.verdict-g{background:var(--color-background-success);color:var(--color-text-success);}
+.verdict-a{background:var(--color-background-warning);color:var(--color-text-warning);}
+.divider{border:none;border-top:0.5px solid var(--color-border-tertiary);margin:1rem 0;}
+</style>
+
+<div class="wrap">
+<div class="tabs">
+  <button class="tb on" onclick="sw(0)">MVP scope</button>
+  <button class="tb" onclick="sw(1)">Table 1</button>
+  <button class="tb" onclick="sw(2)">Table 2</button>
+  <button class="tb" onclick="sw(3)">Table 3</button>
+  <button class="tb" onclick="sw(4)">Table 4 (new)</button>
+  <button class="tb" onclick="sw(5)">Full SQL</button>
+</div>
+
+<!-- TAB 0 — SCOPE -->
+<div class="pane on" id="p0">
+<div class="heading">MVP schema — 4 tables, nothing more</div>
+<div class="card g">
+  <div class="sub" style="margin-top:0;">What MVP needs to work end-to-end</div>
+  <div class="r"><div class="d dg"></div><div>Upload xlsx → parse into L0–L3 capability tree → render on canvas</div></div>
+  <div class="r"><div class="d dg"></div><div>Type a prompt → AI generates diff → Preview Panel → Apply or Cancel</div></div>
+  <div class="r"><div class="d dg"></div><div>In-session undo/redo (Zustand handles this — no DB needed)</div></div>
+  <div class="r"><div class="d dg"></div><div>Export PNG, JSON, PPTX</div></div>
+  <div class="r"><div class="d dg"></div><div>Basic diff log — which prompt changed what (lightweight audit)</div></div>
+</div>
+
+<div class="card a">
+  <div class="sub" style="margin-top:0;">What MVP deliberately skips</div>
+  <div class="r"><div class="d da"></div><div>Multi-user auth and ownership — single user or shared instance is fine for MVP</div></div>
+  <div class="r"><div class="d da"></div><div>RAG knowledge base / capability_chunks / pgvector — AI calls Claude without RAG first, add RAG in v2</div></div>
+  <div class="r"><div class="d da"></div><div>Cross-session undo (full diff replay) — in-session undo via Zustand is sufficient for MVP</div></div>
+  <div class="r"><div class="d da"></div><div>Collaboration / catalog_shares — single consultant per map in MVP</div></div>
+  <div class="r"><div class="d da"></div><div>Prompt quality monitoring / prompt_sessions — not needed until AI is live with real users</div></div>
+  <div class="r"><div class="d da"></div><div>Soft delete / is_deleted — hard delete is fine at MVP scale, add soft delete in v2</div></div>
+</div>
+
+<div class="card b">
+  <div class="sub" style="margin-top:0;">The 4 MVP tables</div>
+  <div class="r"><div class="d db"></div><div><strong style="font-weight:500">Table 1 — capability_catalogs</strong> — your existing table + industry + status columns added</div></div>
+  <div class="r"><div class="d db"></div><div><strong style="font-weight:500">Table 2 — capabilities</strong> — your existing table + updated_at + source columns added</div></div>
+  <div class="r"><div class="d db"></div><div><strong style="font-weight:500">Table 3 — visual_maps</strong> — your existing table + version_number + is_active added</div></div>
+  <div class="r"><div class="d db"></div><div><strong style="font-weight:500">Table 4 — diff_history</strong> — new, lightweight version. Just enough to power version history sidebar and basic undo awareness</div></div>
+</div>
+
+<div class="verdict verdict-g">
+  Your 3 original tables stay — just minor column additions. One new table (diff_history, slim version). That is the complete MVP schema. Build everything else only when real users ask for it.
+</div>
+</div>
+
+<!-- TAB 1 — TABLE 1 -->
+<div class="pane" id="p1">
+<div class="heading">Table 1 — capability_catalogs</div>
+<div class="card">
+  <div class="trow thdr"><div>Field</div><div>Type</div><div>Notes</div></div>
+  <div class="trow">
+    <div class="fname">id</div>
+    <div class="ftype">uuid PK</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> Auto-generated — no change</div>
+  </div>
+  <div class="trow">
+    <div class="fname">name</div>
+    <div class="ftype">text NOT NULL</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> e.g. "SPM Capability Model" — no change</div>
+  </div>
+  <div class="trow">
+    <div class="fname">description</div>
+    <div class="ftype">text</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> Optional — no change</div>
+  </div>
+  <div class="trow">
+    <div class="fname">industry</div>
+    <div class="ftype">text</div>
+    <div class="fnote"><span class="badge badge-mod">ADD</span> "Banking" | "Healthcare" | "Retail" — the RAG filter context. Has nowhere to live in your current schema. Needed from day 1 to pass to the AI pipeline.</div>
+  </div>
+  <div class="trow">
+    <div class="fname">status</div>
+    <div class="ftype">text</div>
+    <div class="fnote"><span class="badge badge-mod">ADD</span> Default "active". Allows archiving without deleting. Simple — just a text flag.</div>
+  </div>
+  <div class="trow">
+    <div class="fname">created_at</div>
+    <div class="ftype">timestamptz</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> Default now() — no change</div>
+  </div>
+  <div class="trow">
+    <div class="fname">updated_at</div>
+    <div class="ftype">timestamptz</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> Default now() — no change</div>
+  </div>
+</div>
+<div class="card a">
+  <div class="sub" style="margin-top:0;">Skipped for MVP</div>
+  <div class="r"><div class="d da"></div><div>user_id — skip. Add when you introduce auth and multi-user support in v2. For MVP, one instance = one consultant team, no ownership needed.</div></div>
+</div>
+<div class="code">-- MVP modification: add 2 columns to your existing table
+ALTER TABLE capability_catalogs
+  ADD COLUMN industry text,
+  ADD COLUMN status   text DEFAULT 'active';</div>
+</div>
+
+<!-- TAB 2 — TABLE 2 -->
+<div class="pane" id="p2">
+<div class="heading">Table 2 — capabilities</div>
+<div class="card">
+  <div class="trow thdr"><div>Field</div><div>Type</div><div>Notes</div></div>
+  <div class="trow">
+    <div class="fname">id</div>
+    <div class="ftype">uuid PK</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> No change</div>
+  </div>
+  <div class="trow">
+    <div class="fname">catalog_id</div>
+    <div class="ftype">uuid FK</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> → capability_catalogs.id, cascade delete — no change</div>
+  </div>
+  <div class="trow">
+    <div class="fname">parent_id</div>
+    <div class="ftype">uuid FK nullable</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> Self-reference, null = root L0 — no change. This is the correct tree model.</div>
+  </div>
+  <div class="trow">
+    <div class="fname">level</div>
+    <div class="ftype">smallint</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> 0, 1, 2, 3 — no change</div>
+  </div>
+  <div class="trow">
+    <div class="fname">name</div>
+    <div class="ftype">text NOT NULL</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> Capability name — no change</div>
+  </div>
+  <div class="trow">
+    <div class="fname">description</div>
+    <div class="ftype">text</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> Optional — no change</div>
+  </div>
+  <div class="trow">
+    <div class="fname">sort_order</div>
+    <div class="ftype">integer</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> Preserves original row order — no change</div>
+  </div>
+  <div class="trow">
+    <div class="fname">source</div>
+    <div class="ftype">text</div>
+    <div class="fnote"><span class="badge badge-mod">ADD</span> "xlsx_import" | "ai_generated". Lets you know which nodes came from the original file vs AI edits. Useful from day 1 for debugging.</div>
+  </div>
+  <div class="trow">
+    <div class="fname">created_at</div>
+    <div class="ftype">timestamptz</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> No change</div>
+  </div>
+  <div class="trow">
+    <div class="fname">updated_at</div>
+    <div class="ftype">timestamptz</div>
+    <div class="fnote"><span class="badge badge-mod">ADD</span> Missing from your original. Every rename via AI diff needs a timestamp. Auto-update via trigger.</div>
+  </div>
+</div>
+
+<div class="card a">
+  <div class="sub" style="margin-top:0;">Skipped for MVP</div>
+  <div class="r"><div class="d da"></div><div>is_deleted — skip. Hard delete is fine for MVP. Add soft delete in v2 when you need cross-session undo of removals. For now, if a node is removed it is gone and the user can undo in-session via Zustand only.</div></div>
+</div>
+
+<div class="code">-- MVP modification: add 2 columns + trigger
+ALTER TABLE capabilities
+  ADD COLUMN source     text DEFAULT 'xlsx_import',
+  ADD COLUMN updated_at timestamptz DEFAULT now();
+
+-- Auto-update updated_at on every row change
+CREATE OR REPLACE FUNCTION update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER capabilities_updated_at
+  BEFORE UPDATE ON capabilities
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();</div>
+</div>
+
+<!-- TAB 3 — TABLE 3 -->
+<div class="pane" id="p3">
+<div class="heading">Table 3 — visual_maps</div>
+<div class="card">
+  <div class="trow thdr"><div>Field</div><div>Type</div><div>Notes</div></div>
+  <div class="trow">
+    <div class="fname">id</div>
+    <div class="ftype">uuid PK</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> No change</div>
+  </div>
+  <div class="trow">
+    <div class="fname">catalog_id</div>
+    <div class="ftype">uuid FK</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> → capability_catalogs.id, cascade delete — no change</div>
+  </div>
+  <div class="trow">
+    <div class="fname">name</div>
+    <div class="ftype">text NOT NULL</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> e.g. "SPM Capability Map v1" — no change</div>
+  </div>
+  <div class="trow">
+    <div class="fname">version_number</div>
+    <div class="ftype">integer</div>
+    <div class="fnote"><span class="badge badge-mod">ADD</span> Default 1, increments per catalog on each apply. Without this you cannot tell which layout row is current vs history. Needed for version history sidebar.</div>
+  </div>
+  <div class="trow">
+    <div class="fname">is_active</div>
+    <div class="ftype">boolean</div>
+    <div class="fnote"><span class="badge badge-mod">ADD</span> Default true. Only one row per catalog should be active at a time — the currently displayed layout. Others are history. Simple flag, no extra tables needed.</div>
+  </div>
+  <div class="trow">
+    <div class="fname">layout_data</div>
+    <div class="ftype">jsonb</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> React Flow node/edge x,y positions — no change. jsonb is the right type.</div>
+  </div>
+  <div class="trow">
+    <div class="fname">created_at</div>
+    <div class="ftype">timestamptz</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> No change</div>
+  </div>
+  <div class="trow">
+    <div class="fname">updated_at</div>
+    <div class="ftype">timestamptz</div>
+    <div class="fnote"><span class="badge badge-keep">KEEP</span> No change — you already had this right</div>
+  </div>
+</div>
+
+<div class="card a">
+  <div class="sub" style="margin-top:0;">Skipped for MVP</div>
+  <div class="r"><div class="d da"></div><div>thumbnail_url — skip. No need to generate and store PNG thumbnails for version history at MVP. Just show the version number and timestamp in the sidebar.</div></div>
+</div>
+
+<div class="card b">
+  <div class="sub" style="margin-top:0;">Important design rule for visual_maps in MVP</div>
+  <div class="r"><div class="d db"></div><div>Every time a user clicks Apply Changes, insert a new row into visual_maps (new version) rather than updating the existing row. Set is_active = true on the new row and false on all previous rows for that catalog. This gives you a free version history without any extra infrastructure.</div></div>
+  <div class="code">-- When user applies a diff:
+-- Step 1: deactivate current layout
+UPDATE visual_maps
+  SET is_active = false
+  WHERE catalog_id = $catalog_id;
+
+-- Step 2: insert new version
+INSERT INTO visual_maps
+  (catalog_id, name, version_number, is_active, layout_data)
+VALUES (
+  $catalog_id,
+  'Map v' || $next_version,
+  $next_version,
+  true,
+  $new_layout_data
+);</div>
+</div>
+
+<div class="code">-- MVP modification: add 2 columns
+ALTER TABLE visual_maps
+  ADD COLUMN version_number integer DEFAULT 1,
+  ADD COLUMN is_active      boolean DEFAULT true;</div>
+</div>
+
+<!-- TAB 4 — TABLE 4 NEW -->
+<div class="pane" id="p4">
+<div class="heading">Table 4 — diff_history (new, slim MVP version)</div>
+
+<div class="card g">
+  <div class="sub" style="margin-top:0;">Why you need this even at MVP</div>
+  <div class="r"><div class="d dg"></div><div>Without diff_history, the version history sidebar in the UI shows visual layout snapshots but cannot tell the user <em>what changed</em> or <em>which prompt caused it</em>.</div></div>
+  <div class="r"><div class="d dg"></div><div>It also gives you the prompt text back — so if Claude produces a bad result you can see exactly what the user typed.</div></div>
+  <div class="r"><div class="d dg"></div><div>This is a lightweight version — 7 fields only. No user_id, no model tracking, no retry counts for MVP.</div></div>
+</div>
+
+<div class="card">
+  <div class="trow thdr"><div>Field</div><div>Type</div><div>Notes</div></div>
+  <div class="trow">
+    <div class="fname">id</div>
+    <div class="ftype">uuid PK</div>
+    <div class="fnote">Auto-generated</div>
+  </div>
+  <div class="trow">
+    <div class="fname">catalog_id</div>
+    <div class="ftype">uuid FK</div>
+    <div class="fnote">→ capability_catalogs.id, cascade delete. Which catalog this diff belongs to.</div>
+  </div>
+  <div class="trow">
+    <div class="fname">prompt_text</div>
+    <div class="ftype">text NOT NULL</div>
+    <div class="fnote">The exact user prompt — "Add risk management capabilities for a retail bank". Critical for debugging and version history display.</div>
+  </div>
+  <div class="trow">
+    <div class="fname">diff_payload</div>
+    <div class="ftype">jsonb NOT NULL</div>
+    <div class="fnote">The full JSON diff array Claude returned — [{action, level, name, parent_id}...]. Enables replaying the change if needed later.</div>
+  </div>
+  <div class="trow">
+    <div class="fname">status</div>
+    <div class="ftype">text</div>
+    <div class="fnote">Default "applied". Set to "cancelled" if user clicked Cancel. Simple enough for MVP — tells you which diffs actually changed the map.</div>
+  </div>
+  <div class="trow">
+    <div class="fname">visual_map_id</div>
+    <div class="ftype">uuid FK nullable</div>
+    <div class="fnote">→ visual_maps.id. Links this diff to the layout snapshot it produced. Null if cancelled. Lets the version history sidebar connect "what changed" to "how it looked".</div>
+  </div>
+  <div class="trow">
+    <div class="fname">created_at</div>
+    <div class="ftype">timestamptz</div>
+    <div class="fnote">Default now(). When the diff was generated and shown in Preview Panel.</div>
+  </div>
+</div>
+
+<div class="card a">
+  <div class="sub" style="margin-top:0;">Skipped from the full schema for MVP</div>
+  <div class="r"><div class="d da"></div><div>applied_by (user_id) — skip. No auth in MVP.</div></div>
+  <div class="r"><div class="d da"></div><div>model_used — skip. Add when you introduce SLM routing in v2. For MVP, Claude handles everything.</div></div>
+  <div class="r"><div class="d da"></div><div>applied_at — skip. created_at is sufficient for MVP timeline display.</div></div>
+</div>
+
+<div class="code">-- Create the slim MVP diff_history table
+CREATE TABLE diff_history (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  catalog_id     uuid REFERENCES capability_catalogs(id) ON DELETE CASCADE,
+  prompt_text    text NOT NULL,
+  diff_payload   jsonb NOT NULL,
+  status         text DEFAULT 'applied',  -- 'applied' | 'cancelled'
+  visual_map_id  uuid REFERENCES visual_maps(id) ON DELETE SET NULL,
+  created_at     timestamptz DEFAULT now()
+);
+
+CREATE INDEX ON diff_history(catalog_id);
+CREATE INDEX ON diff_history(created_at DESC);</div>
+</div>
+
+<!-- TAB 5 — FULL SQL -->
+<div class="pane" id="p5">
+<div class="heading">Complete MVP SQL — run this in Supabase SQL editor</div>
+
+<div class="card b">
+  <div class="sub" style="margin-top:0;">What this script does</div>
+  <div class="r"><div class="d db"></div><div>Modifies your 3 existing tables with the minimum additions</div></div>
+  <div class="r"><div class="d db"></div><div>Creates the 1 new table (diff_history, slim version)</div></div>
+  <div class="r"><div class="d db"></div><div>Adds the updated_at auto-trigger on capabilities</div></div>
+  <div class="r"><div class="d db"></div><div>Adds one useful extra index on capabilities sort_order</div></div>
+  <div class="r"><div class="d db"></div><div>Safe to run — uses IF NOT EXISTS and IF NOT COLUMN patterns where possible</div></div>
+</div>
+
+<div class="code">-- ═══════════════════════════════════════════
+-- MVP SCHEMA — run in Supabase SQL editor
+-- ═══════════════════════════════════════════
+
+-- ── TABLE 1: capability_catalogs ──────────
+-- Add industry and status columns
+
+ALTER TABLE capability_catalogs
+  ADD COLUMN IF NOT EXISTS industry text,
+  ADD COLUMN IF NOT EXISTS status   text DEFAULT 'active';
+
+COMMENT ON COLUMN capability_catalogs.industry
+  IS 'Banking | Healthcare | Retail — sent to AI as RAG filter';
+COMMENT ON COLUMN capability_catalogs.status
+  IS 'active | archived — soft archive without deleting';
+
+
+-- ── TABLE 2: capabilities ─────────────────
+-- Add source, updated_at, and auto-trigger
+
+ALTER TABLE capabilities
+  ADD COLUMN IF NOT EXISTS source     text DEFAULT 'xlsx_import',
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+
+COMMENT ON COLUMN capabilities.source
+  IS 'xlsx_import | ai_generated | manual';
+
+-- Auto-update updated_at on every row change
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS capabilities_updated_at ON capabilities;
+CREATE TRIGGER capabilities_updated_at
+  BEFORE UPDATE ON capabilities
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+-- Extra index for ordered retrieval (MVP useful)
+CREATE INDEX IF NOT EXISTS
+  capabilities_catalog_sort_idx
+  ON capabilities(catalog_id, sort_order);
+
+
+-- ── TABLE 3: visual_maps ──────────────────
+-- Add version_number and is_active
+
+ALTER TABLE visual_maps
+  ADD COLUMN IF NOT EXISTS version_number integer DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS is_active      boolean DEFAULT true;
+
+COMMENT ON COLUMN visual_maps.version_number
+  IS 'Increments per catalog on each Apply — enables version history sidebar';
+COMMENT ON COLUMN visual_maps.is_active
+  IS 'Only one row per catalog is true at a time — the current layout';
+
+-- Index for fast "get active layout for this catalog"
+CREATE INDEX IF NOT EXISTS
+  visual_maps_active_idx
+  ON visual_maps(catalog_id, is_active);
+
+
+-- ── TABLE 4: diff_history (NEW) ───────────
+-- Slim MVP version — 7 fields only
+
+CREATE TABLE IF NOT EXISTS diff_history (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  catalog_id    uuid REFERENCES capability_catalogs(id)
+                     ON DELETE CASCADE,
+  prompt_text   text NOT NULL,
+  diff_payload  jsonb NOT NULL,
+  status        text DEFAULT 'applied',
+  visual_map_id uuid REFERENCES visual_maps(id)
+                     ON DELETE SET NULL,
+  created_at    timestamptz DEFAULT now()
+);
+
+COMMENT ON TABLE diff_history
+  IS 'Lightweight audit log — every prompt that reached the AI';
+COMMENT ON COLUMN diff_history.status
+  IS 'applied | cancelled';
+COMMENT ON COLUMN diff_history.visual_map_id
+  IS 'Links to the visual_maps row created by this diff — null if cancelled';
+
+CREATE INDEX IF NOT EXISTS diff_history_catalog_idx
+  ON diff_history(catalog_id);
+CREATE INDEX IF NOT EXISTS diff_history_created_idx
+  ON diff_history(created_at DESC);
+
+
+-- ═══════════════════════════════════════════
+-- MVP SCHEMA COMPLETE
+-- 3 modified tables + 1 new table
+-- Total: 4 tables, ready to build on
+-- ═══════════════════════════════════════════</div>
+
+<div class="verdict verdict-g">
+  Run this once in Supabase → SQL editor. Your database is MVP-ready. Add capability_chunks (pgvector), user_id auth, is_deleted soft delete, and prompt_sessions only when you move to v2.
+</div>
+</div>
+
+</div>
+<script>
+function sw(n){
+  document.querySelectorAll('.tb').forEach(function(b,i){b.classList.toggle('on',i===n);});
+  document.querySelectorAll('.pane').forEach(function(p,i){p.classList.toggle('on',i===n);});
+}
+</script>
+</div>

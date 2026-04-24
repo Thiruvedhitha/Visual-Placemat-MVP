@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseCapabilityCatalog } from "@/lib/parser/excelParser";
-import { insertCatalogFromRows } from "@/lib/db/postgres/capabilities";
+import { createCatalog, insertCapabilitiesForCatalog, checkExistingCatalog } from "@/lib/db/postgres/capabilities";
 
 export async function POST(request: NextRequest) {
   try {
@@ -34,10 +34,29 @@ export async function POST(request: NextRequest) {
 
     // Derive catalog name from file name (strip extension)
     const catalogName = file.name.replace(/\.(xlsx|xls|csv)$/i, "").trim();
+    const industry = (formData.get("industry") as string | null) || undefined;
 
-    // Insert into Supabase
-    const catalogId = await insertCatalogFromRows(catalogName, rows);
+    // 1. Check for duplicate catalog name
+    const existing = await checkExistingCatalog(catalogName);
+    if (existing) {
+      return NextResponse.json({
+        success: true,
+        catalogId: existing,
+        catalogName,
+        capabilitiesCount: rows.length,
+        duplicate: true,
+      });
+    }
 
+    // 2. Create catalog record (fast — single insert)
+    const catalogId = await createCatalog(catalogName, industry);
+
+    // 3. Fire-and-forget: insert capabilities in background
+    insertCapabilitiesForCatalog(catalogId, rows).catch((err) =>
+      console.error("Background capability insert failed:", err)
+    );
+
+    // 3. Return immediately so the client can navigate
     return NextResponse.json({
       success: true,
       catalogId,

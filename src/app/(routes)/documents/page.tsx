@@ -3,7 +3,6 @@
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import * as XLSX from "xlsx";
 
 const SAMPLE_COLUMNS = [
   { key: "L0", label: "L0", value: "Strategic Portfolio",  bg: "bg-navy-950",  text: "text-white" },
@@ -29,8 +28,11 @@ export default function DocumentsUploadPage() {
   const [saving, setSaving]                 = useState(false);
   const [saveError, setSaveError]           = useState<string | null>(null);
 
+  const submittingRef = useRef(false);
+
   const handleContinue = async () => {
-    if (!uploadedFile) return;
+    if (!uploadedFile || submittingRef.current) return;
+    submittingRef.current = true;
     setSaving(true);
     setSaveError(null);
     try {
@@ -40,14 +42,16 @@ export default function DocumentsUploadPage() {
       const data = await res.json();
       if (!res.ok) {
         setSaveError(data.error || "Upload failed");
+        setSaving(false);
+        submittingRef.current = false;
         return;
       }
-      // Saved — navigate to canvas
+      // Saved — navigate to canvas (don't reset saving so button stays in loading state)
       router.push(`/dashboard?catalogId=${data.catalogId}`);
     } catch {
       setSaveError("Network error. Please try again.");
-    } finally {
       setSaving(false);
+      submittingRef.current = false;
     }
   };
 
@@ -69,6 +73,7 @@ export default function DocumentsUploadPage() {
 
   const parseFile = async (file: File) => {
     try {
+      const XLSX = await import("xlsx");
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer, { type: "array" });
       const ws = wb.Sheets[wb.SheetNames[0]];

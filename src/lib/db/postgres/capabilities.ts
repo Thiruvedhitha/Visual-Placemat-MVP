@@ -2,33 +2,48 @@ import { supabaseAdmin } from "./client";
 import type { ParsedCapabilityRow } from "@/types/capability";
 
 /**
- * Creates a new catalog and inserts all capabilities from parsed Excel rows.
- * Uses batch insert for speed.
+ * Checks if a catalog with the same name already exists.
+ * Returns the existing catalog ID, or null if none found.
  */
-export async function insertCatalogFromRows(
-  catalogName: string,
-  rows: ParsedCapabilityRow[]
-) {
-  // 1. Create catalog
-  const { data: catalog, error: catError } = await supabaseAdmin
+export async function checkExistingCatalog(catalogName: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
     .from("capability_catalogs")
-    .insert({ name: catalogName })
+    .select("id")
+    .eq("name", catalogName)
+    .limit(1)
+    .single();
+
+  return data?.id ?? null;
+}
+
+/**
+ * Creates a new catalog record and returns its ID.
+ * This is a single fast INSERT — used to get the catalogId quickly.
+ */
+export async function createCatalog(catalogName: string, industry?: string): Promise<string> {
+  const { data: catalog, error } = await supabaseAdmin
+    .from("capability_catalogs")
+    .insert({ name: catalogName, industry: industry || null })
     .select("id")
     .single();
 
-  if (catError || !catalog) throw new Error("Failed to create catalog: " + catError?.message);
+  if (error || !catalog) throw new Error("Failed to create catalog: " + error?.message);
+  return catalog.id;
+}
 
-  const catalogId = catalog.id;
-
-  // 2. Build capability records with temporary IDs for parent tracking
-  //    Since parent_id needs real UUIDs, we insert level-by-level.
-
-  // Track current parent names at each level
+/**
+ * Inserts all capabilities for an existing catalog.
+ * Uses a single bulk insert (no parent_id), then patches parent_ids in one pass.
+ */
+export async function insertCapabilitiesForCatalog(
+  catalogId: string,
+  rows: ParsedCapabilityRow[]
+) {
+  // Build flat records
   let currentL0Name: string | null = null;
   let currentL1Name: string | null = null;
   let currentL2Name: string | null = null;
 
-  // Collect records by level
   type CapRecord = { name: string; description: string | null; level: number; parentKey: string | null; sort_order: number };
   const records: CapRecord[] = [];
   let sortOrder = 0;
@@ -54,37 +69,58 @@ export async function insertCatalogFromRows(
     }
   }
 
-  // 3. Insert level by level so we can resolve parent IDs
-  const nameToId = new Map<string, string>(); // "level:name" → uuid
+  // 1. Bulk-insert ALL rows at once with parent_id = null
+  const insertData = records.map((r) => ({
+    catalog_id: catalogId,
+    parent_id: null,
+    level: r.level,
+    name: r.name,
+    description: r.description,
+    sort_order: r.sort_order,
+    source: "xlsx_import",
+  }));
 
-  for (const level of [0, 1, 2, 3]) {
-    const levelRecords = records.filter((r) => r.level === level);
-    if (levelRecords.length === 0) continue;
+  const { data: inserted, error } = await supabaseAdmin
+    .from("capabilities")
+    .insert(insertData)
+    .select("id, name, level");
 
-    const insertData = levelRecords.map((r) => ({
-      catalog_id: catalogId,
-      parent_id: r.parentKey ? (nameToId.get(r.parentKey) || null) : null,
-      level: r.level,
-      name: r.name,
-      description: r.description,
-      sort_order: r.sort_order,
-    }));
+  if (error) throw new Error("Failed to insert capabilities: " + error.message);
+  if (!inserted) return;
 
-    const { data, error } = await supabaseAdmin
-      .from("capabilities")
-      .insert(insertData)
-      .select("id, name, level");
+  // 2. Build name→id map and patch parent_ids in one batch update
+  const nameToId = new Map<string, string>();
+  inserted.forEach((row) => nameToId.set(`${row.level}:${row.name}`, row.id));
 
-    if (error) throw new Error("Failed to insert L" + level + " capabilities: " + error.message);
-
-    // Map inserted IDs back
-    if (data) {
-      for (let i = 0; i < data.length; i++) {
-        nameToId.set(`${data[i].level}:${data[i].name}`, data[i].id);
+  const updates: { id: string; parent_id: string }[] = [];
+  for (let i = 0; i < records.length; i++) {
+    const rec = records[i];
+    if (rec.parentKey) {
+      const parentId = nameToId.get(rec.parentKey);
+      if (parentId) {
+        updates.push({ id: inserted[i].id, parent_id: parentId });
       }
     }
   }
 
+  if (updates.length > 0) {
+    // Supabase upsert to set parent_ids in one call
+    await supabaseAdmin
+      .from("capabilities")
+      .upsert(updates, { onConflict: "id", ignoreDuplicates: false });
+  }
+}
+
+/**
+ * Legacy wrapper — creates catalog + inserts capabilities in one call.
+ */
+export async function insertCatalogFromRows(
+  catalogName: string,
+  rows: ParsedCapabilityRow[],
+  industry?: string
+) {
+  const catalogId = await createCatalog(catalogName, industry);
+  await insertCapabilitiesForCatalog(catalogId, rows);
   return catalogId;
 }
 
