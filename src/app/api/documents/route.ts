@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseCapabilityCatalog } from "@/lib/parser/excelParser";
-import { createCatalog, insertCapabilitiesForCatalog, checkExistingCatalog } from "@/lib/db/postgres/capabilities";
+import { createCatalog, insertCapabilitiesForCatalog, findDuplicateCatalog } from "@/lib/db/postgres/capabilities";
 
 export async function POST(request: NextRequest) {
   try {
@@ -32,12 +32,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No capability data found in the file" }, { status: 400 });
     }
 
-    // Derive catalog name from file name (strip extension)
-    const catalogName = file.name.replace(/\.(xlsx|xls|csv)$/i, "").trim();
+    // Derive catalog name from file name (strip extension + trailing " (1)", " (2)" etc.)
+    const catalogName = file.name
+      .replace(/\.(xlsx|xls|csv)$/i, "")
+      .replace(/\s*\(\d+\)\s*$/, "")
+      .trim();
     const industry = (formData.get("industry") as string | null) || undefined;
 
-    // 1. Check for duplicate catalog name
-    const existing = await checkExistingCatalog(catalogName);
+    // 1. Content-based dedup: compare row count + L0 names against existing catalogs
+    const existing = await findDuplicateCatalog(rows);
     if (existing) {
       return NextResponse.json({
         success: true,

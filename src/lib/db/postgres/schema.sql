@@ -10,9 +10,14 @@ create table if not exists capability_catalogs (
   description   text,
   industry      text,                                   -- "Banking" | "Healthcare" | "Retail" — AI context
   status        text default 'active',                  -- "active" | "archived"
+  content_hash  text,                                   -- SHA-256 of parsed data for dedup
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
+
+-- Unique index on content_hash to prevent duplicate uploads
+create unique index if not exists idx_catalogs_content_hash
+  on capability_catalogs (content_hash) where content_hash is not null;
 
 -- 2. Capabilities (hierarchical L0→L1→L2→L3)
 create table if not exists capabilities (

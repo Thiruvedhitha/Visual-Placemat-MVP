@@ -2,18 +2,47 @@ import { supabaseAdmin } from "./client";
 import type { ParsedCapabilityRow } from "@/types/capability";
 
 /**
- * Checks if a catalog with the same name already exists.
- * Returns the existing catalog ID, or null if none found.
+ * Content-based dedup: finds an existing catalog with identical capability data.
+ * Compares row count + L0 capability names against all existing catalogs.
  */
-export async function checkExistingCatalog(catalogName: string): Promise<string | null> {
-  const { data } = await supabaseAdmin
+export async function findDuplicateCatalog(rows: ParsedCapabilityRow[]): Promise<string | null> {
+  const parsedCount = rows.length;
+  const parsedL0s = rows
+    .filter((r) => r.l0)
+    .map((r) => r.l0!.trim())
+    .sort()
+    .join("|");
+
+  // 1. Get all catalogs with their capability counts
+  const { data: catalogs } = await supabaseAdmin
     .from("capability_catalogs")
     .select("id")
-    .eq("name", catalogName)
-    .limit(1)
-    .single();
+    .eq("status", "active");
 
-  return data?.id ?? null;
+  if (!catalogs || catalogs.length === 0) return null;
+
+  // 2. For each catalog, check capability count
+  for (const cat of catalogs) {
+    const { count } = await supabaseAdmin
+      .from("capabilities")
+      .select("id", { count: "exact", head: true })
+      .eq("catalog_id", cat.id);
+
+    if (count !== parsedCount) continue;
+
+    // 3. Count matches — compare L0 names
+    const { data: l0Caps } = await supabaseAdmin
+      .from("capabilities")
+      .select("name")
+      .eq("catalog_id", cat.id)
+      .eq("level", 0)
+      .order("name", { ascending: true });
+
+    const existingL0s = (l0Caps || []).map((c) => c.name.trim()).join("|");
+    if (existingL0s === parsedL0s) return cat.id;
+  }
+
+  return null;
 }
 
 /**
