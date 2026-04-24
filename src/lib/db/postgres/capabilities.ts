@@ -33,7 +33,7 @@ export async function createCatalog(catalogName: string, industry?: string): Pro
 
 /**
  * Inserts all capabilities for an existing catalog.
- * Uses a single bulk insert (no parent_id), then patches parent_ids in one pass.
+ * Inserts level-by-level (L0→L3) so parent_id can be resolved from previous levels.
  */
 export async function insertCapabilitiesForCatalog(
   catalogId: string,
@@ -69,45 +69,33 @@ export async function insertCapabilitiesForCatalog(
     }
   }
 
-  // 1. Bulk-insert ALL rows at once with parent_id = null
-  const insertData = records.map((r) => ({
-    catalog_id: catalogId,
-    parent_id: null,
-    level: r.level,
-    name: r.name,
-    description: r.description,
-    sort_order: r.sort_order,
-    source: "xlsx_import",
-  }));
+  // Insert level by level so parent_id is resolved from already-inserted rows
+  const nameToId = new Map<string, string>(); // "level:name" → uuid
 
-  const { data: inserted, error } = await supabaseAdmin
-    .from("capabilities")
-    .insert(insertData)
-    .select("id, name, level");
+  for (const level of [0, 1, 2, 3]) {
+    const levelRecords = records.filter((r) => r.level === level);
+    if (levelRecords.length === 0) continue;
 
-  if (error) throw new Error("Failed to insert capabilities: " + error.message);
-  if (!inserted) return;
+    const insertData = levelRecords.map((r) => ({
+      catalog_id: catalogId,
+      parent_id: r.parentKey ? (nameToId.get(r.parentKey) || null) : null,
+      level: r.level,
+      name: r.name,
+      description: r.description,
+      sort_order: r.sort_order,
+      source: "xlsx_import",
+    }));
 
-  // 2. Build name→id map and patch parent_ids in one batch update
-  const nameToId = new Map<string, string>();
-  inserted.forEach((row) => nameToId.set(`${row.level}:${row.name}`, row.id));
-
-  const updates: { id: string; parent_id: string }[] = [];
-  for (let i = 0; i < records.length; i++) {
-    const rec = records[i];
-    if (rec.parentKey) {
-      const parentId = nameToId.get(rec.parentKey);
-      if (parentId) {
-        updates.push({ id: inserted[i].id, parent_id: parentId });
-      }
-    }
-  }
-
-  if (updates.length > 0) {
-    // Supabase upsert to set parent_ids in one call
-    await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from("capabilities")
-      .upsert(updates, { onConflict: "id", ignoreDuplicates: false });
+      .insert(insertData)
+      .select("id, name, level");
+
+    if (error) throw new Error("Failed to insert L" + level + " capabilities: " + error.message);
+
+    if (data) {
+      data.forEach((row) => nameToId.set(`${row.level}:${row.name}`, row.id));
+    }
   }
 }
 
