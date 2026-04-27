@@ -21,6 +21,9 @@ export default function DashboardCanvasPage() {
 function DashboardContent() {
   const searchParams = useSearchParams();
   const catalogId = searchParams.get("catalogId");
+  const exportHref = catalogId
+    ? `/export?catalogId=${encodeURIComponent(catalogId)}`
+    : "/export";
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-slate-50">
@@ -38,12 +41,20 @@ function DashboardContent() {
           </p>
         )}
       </div>
-      <Link
-        href="/"
-        className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 hover:shadow-md active:scale-95"
-      >
-        &larr; Back to Home
-      </Link>
+      <div className="flex items-center gap-3">
+        <Link
+          href={exportHref}
+          className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 hover:shadow-md active:scale-95"
+        >
+          Export
+        </Link>
+        <Link
+          href="/"
+          className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+        >
+          &larr; Back to Home
+        </Link>
+      </div>
     </div>
   );
 }
