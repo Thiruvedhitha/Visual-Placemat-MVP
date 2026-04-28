@@ -1,0 +1,624 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+.wrap{padding:.5rem 0 1.5rem;}
+.tabs{display:flex;gap:5px;margin-bottom:1.2rem;border-bottom:0.5px solid var(--color-border-tertiary);padding-bottom:10px;flex-wrap:wrap;}
+.tb{font-size:11px;padding:6px 13px;border-radius:20px;border:0.5px solid var(--color-border-secondary);background:var(--color-background-primary);color:var(--color-text-secondary);cursor:pointer;transition:all 0.15s;}
+.tb.on{background:#1A56DB;color:#fff;border-color:#1A56DB;font-weight:500;}
+.pane{display:none;animation:fi .15s ease;}.pane.on{display:block;}
+@keyframes fi{from{opacity:0}to{opacity:1}}
+.card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:12px;padding:12px 14px;margin-bottom:10px;}
+.card.g{border-left:3px solid #059669;}
+.card.a{border-left:3px solid #B45309;}
+.card.b{border-left:3px solid #2563EB;}
+.card.p{border-left:3px solid #7C3AED;}
+.card.r{border-left:3px solid #DC2626;}
+.heading{font-size:15px;font-weight:500;color:var(--color-text-primary);margin-bottom:6px;}
+.sub{font-size:11px;font-weight:600;color:var(--color-text-secondary);margin:10px 0 6px;text-transform:uppercase;letter-spacing:.05em;}
+.sub:first-child{margin-top:0;}
+.row{display:flex;gap:8px;font-size:12px;color:var(--color-text-secondary);line-height:1.65;margin-bottom:5px;align-items:flex-start;}
+.d{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:4px;}
+.dg{background:#059669;}.da{background:#B45309;}.db{background:#2563EB;}.dp{background:#7C3AED;}.dr{background:#DC2626;}
+.code{background:var(--color-background-secondary);border-radius:8px;padding:10px 13px;font-size:11px;font-family:var(--font-mono);color:var(--color-text-primary);line-height:1.8;margin:8px 0;white-space:pre-wrap;word-break:break-word;}
+.tag{font-size:10px;padding:2px 8px;border-radius:10px;display:inline-block;margin:3px 2px 0 0;font-weight:500;}
+.tg{background:var(--color-background-success);color:var(--color-text-success);}
+.ta{background:var(--color-background-warning);color:var(--color-text-warning);}
+.tb2{background:var(--color-background-info);color:var(--color-text-info);}
+.tp{background:#F5F3FF;color:#6D28D9;}
+.tr2{background:var(--color-background-danger);color:var(--color-text-danger);}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+.trow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;padding:7px 0;border-bottom:0.5px solid var(--color-border-tertiary);font-size:11px;align-items:start;}
+.trow:last-child{border-bottom:none;}
+.thdr{font-weight:600;font-size:10px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.04em;}
+.mono{font-family:var(--font-mono);font-size:11px;}
+.user-card{border-radius:10px;padding:10px 12px;margin-bottom:8px;}
+.swa{background:rgba(37,99,235,0.1);border:1px solid rgba(37,99,235,0.25);}
+.amex{background:rgba(124,58,237,0.1);border:1px solid rgba(124,58,237,0.25);}
+.takeda{background:rgba(5,150,105,0.1);border:1px solid rgba(5,150,105,0.25);}
+.user-label{font-size:12px;font-weight:600;margin-bottom:4px;}
+.verdict{border-radius:8px;padding:10px 13px;font-size:12px;line-height:1.7;margin-top:8px;}
+.verdict-g{background:var(--color-background-success);color:var(--color-text-success);}
+.verdict-a{background:var(--color-background-warning);color:var(--color-text-warning);}
+.step{display:flex;gap:10px;margin-bottom:10px;align-items:flex-start;}
+.snum{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#fff;flex-shrink:0;margin-top:2px;}
+.sbody{flex:1;}
+.stitle{font-size:13px;font-weight:500;color:var(--color-text-primary);margin-bottom:3px;}
+.sdesc{font-size:12px;color:var(--color-text-secondary);line-height:1.6;}
+.divider{border:none;border-top:0.5px solid var(--color-border-tertiary);margin:1rem 0;}
+.hl-swa{color:#3B82F6;font-weight:500;}
+.hl-amex{color:#8B5CF6;font-weight:500;}
+.hl-takeda{color:#059669;font-weight:500;}
+</style>
+
+<div class="wrap">
+<div class="tabs">
+  <button class="tb on" onclick="sw(0)">The scenario</button>
+  <button class="tb" onclick="sw(1)">How DB stores it</button>
+  <button class="tb" onclick="sw(2)">Complete flow</button>
+  <button class="tb" onclick="sw(3)">Isolation & security</button>
+  <button class="tb" onclick="sw(4)">RAG across clients</button>
+  <button class="tb" onclick="sw(5)">Full schema wired up</button>
+</div>
+
+<!-- TAB 0 — SCENARIO -->
+<div class="pane on" id="p0">
+<div class="heading">The scenario — 3 consultants, same template, 3 different clients</div>
+
+<div class="grid3">
+  <div class="user-card swa">
+    <div class="user-label hl-swa">👤 User A — Alice</div>
+    <div style="font-size:11px;color:var(--color-text-secondary);line-height:1.6;">
+      Uploads SPM_Template.xlsx<br>
+      Client: <strong>SWA (Southwest Airlines)</strong><br>
+      Industry: Retail / Airline<br>
+      Prompt: "Add loyalty program capabilities"
+    </div>
+  </div>
+  <div class="user-card amex">
+    <div class="user-label hl-amex">👤 User B — Bob</div>
+    <div style="font-size:11px;color:var(--color-text-secondary);line-height:1.6;">
+      Uploads SPM_Template.xlsx<br>
+      Client: <strong>AMEX (American Express)</strong><br>
+      Industry: Banking<br>
+      Prompt: "Add risk management capabilities"
+    </div>
+  </div>
+  <div class="user-card takeda">
+    <div class="user-label hl-takeda">👤 User C — Carol</div>
+    <div style="font-size:11px;color:var(--color-text-secondary);line-height:1.6;">
+      Uploads SPM_Template.xlsx<br>
+      Client: <strong>Takeda Pharma</strong><br>
+      Industry: Healthcare<br>
+      Prompt: "Add clinical operations capabilities"
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="sub" style="margin-top:0;">The key question this scenario raises</div>
+  <div class="row"><div class="d db"></div><div>All three users upload the <strong>same SPM template spreadsheet</strong> — does the system create 3 separate copies or share one?</div></div>
+  <div class="row"><div class="d db"></div><div>Can Alice see Bob's AMEX map? Can Bob see Carol's Takeda map?</div></div>
+  <div class="row"><div class="d db"></div><div>When Alice's AI suggests "loyalty program capabilities" using RAG, does it accidentally pull context from Bob's AMEX banking map?</div></div>
+  <div class="row"><div class="d db"></div><div>When Carol's Takeda map is approved and ingested into the knowledge base, does it help or contaminate future prompts?</div></div>
+</div>
+
+<div class="card g">
+  <div class="sub" style="margin-top:0;">Short answers</div>
+  <div class="row"><div class="d dg"></div><div>3 separate copies are stored — one catalog per client per user. The template is the starting point, not a shared object.</div></div>
+  <div class="row"><div class="d dg"></div><div>Alice cannot see Bob or Carol's maps — Row Level Security (RLS) in Supabase enforces this at the database level.</div></div>
+  <div class="row"><div class="d dg"></div><div>RAG is filtered by industry tag — Alice's Retail query never retrieves Banking or Healthcare chunks.</div></div>
+  <div class="row"><div class="d dg"></div><div>Completed client maps are anonymised before ingestion — "AMEX" becomes "banking-client-uuid-xyz" in the knowledge base.</div></div>
+</div>
+</div>
+
+<!-- TAB 1 — HOW DB STORES IT -->
+<div class="pane" id="p1">
+<div class="heading">Exactly how the database stores all 3 scenarios</div>
+
+<div class="sub" style="margin-top:0;">auth.users (Supabase built-in)</div>
+<div class="code">-- 3 rows created automatically when each consultant signs up:
+id                                   | email
+-------------------------------------|------------------------
+<span class="hl-swa">user-alice-uuid-001</span>                  | alice@consultancy.com
+<span class="hl-amex">user-bob-uuid-002</span>                    | bob@consultancy.com
+<span class="hl-takeda">user-carol-uuid-003</span>                  | carol@consultancy.com</div>
+
+<div class="sub">capability_catalogs — 3 separate rows, one per client</div>
+<div class="code">id                   | user_id              | name                    | industry  | client_name | status
+---------------------|----------------------|-------------------------|-----------|-------------|-------
+<span class="hl-swa">cat-swa-uuid-001</span>     | <span class="hl-swa">user-alice-uuid-001</span>   | SWA Capability Map v1   | Airline   | SWA         | active
+<span class="hl-amex">cat-amex-uuid-002</span>    | <span class="hl-amex">user-bob-uuid-002</span>     | AMEX Capability Map v1  | Banking   | AMEX        | active
+<span class="hl-takeda">cat-takeda-uuid-003</span>  | <span class="hl-takeda">user-carol-uuid-003</span>   | Takeda Capability Map   | Healthcare| Takeda      | active
+
+-- KEY POINT: same SPM template uploaded 3 times = 3 separate catalog rows
+-- Each catalog is fully isolated — no sharing of capability rows</div>
+
+<div class="sub">capabilities — 3 completely separate node trees</div>
+<div class="code">id               | catalog_id           | parent_id | level | name                        | source
+-----------------|----------------------|-----------|-------|-----------------------------|-------------
+-- SWA tree (Alice's):
+cap-001          | <span class="hl-swa">cat-swa-uuid-001</span>     | null      | 0     | Strategic Portfolio Mgmt    | xlsx_import
+cap-002          | <span class="hl-swa">cat-swa-uuid-001</span>     | cap-001   | 1     | Customer Experience         | xlsx_import
+cap-003          | <span class="hl-swa">cat-swa-uuid-001</span>     | cap-001   | 1     | Loyalty Program Mgmt        | ai_generated  ← Alice's AI addition
+cap-004          | <span class="hl-swa">cat-swa-uuid-001</span>     | cap-003   | 2     | Points Management           | ai_generated
+
+-- AMEX tree (Bob's):
+cap-101          | <span class="hl-amex">cat-amex-uuid-002</span>    | null      | 0     | Strategic Portfolio Mgmt    | xlsx_import
+cap-102          | <span class="hl-amex">cat-amex-uuid-002</span>    | cap-101   | 1     | Risk Management             | ai_generated  ← Bob's AI addition
+cap-103          | <span class="hl-amex">cat-amex-uuid-002</span>    | cap-102   | 2     | Credit Risk Management      | ai_generated
+
+-- Takeda tree (Carol's):
+cap-201          | <span class="hl-takeda">cat-takeda-uuid-003</span>  | null      | 0     | Strategic Portfolio Mgmt    | xlsx_import
+cap-202          | <span class="hl-takeda">cat-takeda-uuid-003</span>  | cap-201   | 1     | Clinical Operations         | ai_generated  ← Carol's AI addition
+cap-203          | <span class="hl-takeda">cat-takeda-uuid-003</span>  | cap-202   | 2     | Drug Development Mgmt       | ai_generated</div>
+
+<div class="sub">diff_history — 3 separate logs, each scoped to its catalog</div>
+<div class="code">id        | catalog_id           | prompt_text                              | status   | model_used
+----------|----------------------|------------------------------------------|----------|------------
+diff-001  | <span class="hl-swa">cat-swa-uuid-001</span>     | "Add loyalty program capabilities"       | applied  | claude-sonnet-4
+diff-002  | <span class="hl-amex">cat-amex-uuid-002</span>    | "Add risk management capabilities"       | applied  | claude-sonnet-4
+diff-003  | <span class="hl-takeda">cat-takeda-uuid-003</span>  | "Add clinical operations capabilities"   | applied  | claude-sonnet-4
+
+-- Alice can only see diff-001 (her catalog)
+-- Bob can only see diff-002 (his catalog)
+-- Carol can only see diff-003 (her catalog)</div>
+
+<div class="sub">capability_chunks — anonymised, industry-tagged, shared knowledge base</div>
+<div class="code">id          | label                  | industry   | source       | source_catalog_id    | content
+------------|------------------------|------------|--------------|----------------------|--------
+chunk-001   | Loyalty Program Mgmt   | Airline    | client_map   | <span class="hl-swa">cat-swa-uuid-001</span>     | "Loyalty Program Mgmt is an L1..."
+chunk-002   | Credit Risk Mgmt       | Banking    | client_map   | <span class="hl-amex">cat-amex-uuid-002</span>    | "Credit Risk is an L2 under Risk..."
+chunk-003   | Clinical Operations    | Healthcare | client_map   | <span class="hl-takeda">cat-takeda-uuid-003</span>  | "Clinical Operations is an L1..."
+
+-- NOTE: source_catalog_id links back for traceability
+-- But when retrieved by RAG, the client identity is never exposed to Claude
+-- Claude sees: "Airline client map: Loyalty Program Mgmt is an L1..."
+-- Claude does NOT see: "SWA's Loyalty Program Mgmt..."</div>
+</div>
+
+<!-- TAB 2 — COMPLETE FLOW -->
+<div class="pane" id="p2">
+<div class="heading">Complete flow — all 3 users, end to end</div>
+
+<div class="card b">
+  <div class="sub" style="margin-top:0;">Phase 1 — All 3 users upload the same SPM template</div>
+
+  <div class="step">
+    <div class="snum" style="background:#2563EB;">1</div>
+    <div class="sbody">
+      <div class="stitle">Alice logs in → uploads SPM_Template.xlsx → selects "Airline"</div>
+      <div class="sdesc">System creates a new row in capability_catalogs with user_id = alice, industry = "Airline", client_name = "SWA". The spreadsheet parser reads the xlsx and inserts ~40 rows into capabilities, all with catalog_id = cat-swa-uuid-001. Alice sees her SWA map on the canvas.</div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="snum" style="background:#7C3AED;">2</div>
+    <div class="sbody">
+      <div class="stitle">Bob logs in → uploads same SPM_Template.xlsx → selects "Banking"</div>
+      <div class="sdesc">System creates a completely separate row in capability_catalogs with user_id = bob, industry = "Banking", client_name = "AMEX". Parser inserts ~40 rows into capabilities, all with catalog_id = cat-amex-uuid-002. Bob sees his AMEX map — identical structure to Alice's at this point but a completely isolated dataset.</div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="snum" style="background:#059669;">3</div>
+    <div class="sbody">
+      <div class="stitle">Carol logs in → uploads same SPM_Template.xlsx → selects "Healthcare"</div>
+      <div class="sdesc">Same pattern — new row in capability_catalogs, user_id = carol, industry = "Healthcare", client_name = "Takeda". ~40 capability rows with catalog_id = cat-takeda-uuid-003. Carol sees her Takeda map.</div>
+    </div>
+  </div>
+</div>
+
+<div class="card p">
+  <div class="sub" style="margin-top:0;">Phase 2 — Each user types a prompt</div>
+
+  <div class="step">
+    <div class="snum" style="background:#2563EB;">4</div>
+    <div class="sbody">
+      <div class="stitle"><span class="hl-swa">Alice types:</span> "Add loyalty program capabilities"</div>
+      <div class="sdesc">HTTP POST to /api/prompt carries: prompt text + Alice's SWA nodes (catalog_id = cat-swa-uuid-001) + industry = "Airline". Backend embeds the prompt → pgvector searches capability_chunks WHERE industry = "Airline" → retrieves top-5 Airline-tagged chunks only. Context Builder assembles payload → Claude returns diff → Diff Normalizer cleans it → Diff Validator checks it → Preview Panel shows Alice the proposed changes.</div>
+      <div class="code">-- Alice's RAG search is industry-scoped:
+SELECT content FROM capability_chunks
+WHERE industry = 'Airline'
+ORDER BY embedding <=> $alice_prompt_vector
+LIMIT 5;
+-- Never touches Banking or Healthcare chunks</div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="snum" style="background:#7C3AED;">5</div>
+    <div class="sbody">
+      <div class="stitle"><span class="hl-amex">Bob types:</span> "Add risk management capabilities"</div>
+      <div class="sdesc">HTTP POST carries: Bob's AMEX nodes (catalog_id = cat-amex-uuid-002) + industry = "Banking". RAG searches WHERE industry = "Banking" only → retrieves banking risk patterns. Claude produces a banking-specific diff. Bob's Preview Panel shows Risk Management, Credit Risk, Operational Risk, Regulatory Compliance — the standard banking hierarchy.</div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="snum" style="background:#059669;">6</div>
+    <div class="sbody">
+      <div class="stitle"><span class="hl-takeda">Carol types:</span> "Add clinical operations capabilities"</div>
+      <div class="sdesc">HTTP POST carries: Carol's Takeda nodes + industry = "Healthcare". RAG searches WHERE industry = "Healthcare" only. Claude produces healthcare-specific capabilities. Complete isolation — no cross-contamination between the three users' contexts.</div>
+    </div>
+  </div>
+</div>
+
+<div class="card g">
+  <div class="sub" style="margin-top:0;">Phase 3 — Apply changes and save</div>
+
+  <div class="step">
+    <div class="snum" style="background:#059669;">7</div>
+    <div class="sbody">
+      <div class="stitle">Each user clicks Apply Changes</div>
+      <div class="sdesc">Apply Engine mutates Zustand state → new capability rows inserted into capabilities with the correct catalog_id. A new row is inserted into diff_history with catalog_id scoped to that user's catalog. A new row is inserted into visual_maps for the updated layout. All three operations happen independently, in parallel, with no interference.</div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="snum" style="background:#7C3AED;">8</div>
+    <div class="sbody">
+      <div class="stitle">Ingestion pipeline runs post-approval</div>
+      <div class="sdesc">Each approved map's new nodes are embedded and added to capability_chunks. Alice's loyalty program nodes go in tagged as industry = "Airline". Bob's risk nodes tagged as industry = "Banking". Carol's clinical ops tagged as industry = "Healthcare". Next time anyone works on a similar client, the RAG knowledge base has real examples to draw from.</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- TAB 3 — ISOLATION & SECURITY -->
+<div class="pane" id="p3">
+<div class="heading">How isolation and security are enforced — Supabase RLS</div>
+
+<div class="card r">
+  <div class="sub" style="margin-top:0;">The problem without RLS</div>
+  <div class="row"><div class="d dr"></div><div>Without Row Level Security, any user who knows a catalog_id can query it directly via the Supabase API — even if they do not own it. Alice could read Bob's AMEX map.</div></div>
+  <div class="row"><div class="d dr"></div><div>The application layer can enforce this but a clever user could bypass it by calling the Supabase REST API directly with someone else's catalog_id.</div></div>
+</div>
+
+<div class="card g">
+  <div class="sub" style="margin-top:0;">RLS policies — enforce ownership at the database level</div>
+  <div class="code">-- Enable RLS on all user-scoped tables
+ALTER TABLE capability_catalogs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE capabilities        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE visual_maps         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE diff_history        ENABLE ROW LEVEL SECURITY;
+
+-- ── capability_catalogs ────────────────────────────────
+-- Users can only see their own catalogs
+CREATE POLICY "owner_select" ON capability_catalogs
+  FOR SELECT USING (user_id = auth.uid());
+
+CREATE POLICY "owner_insert" ON capability_catalogs
+  FOR INSERT WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "owner_update" ON capability_catalogs
+  FOR UPDATE USING (user_id = auth.uid());
+
+CREATE POLICY "owner_delete" ON capability_catalogs
+  FOR DELETE USING (user_id = auth.uid());
+
+-- ── capabilities ───────────────────────────────────────
+-- Users can only see capabilities in their own catalogs
+CREATE POLICY "owner_capabilities" ON capabilities
+  FOR ALL USING (
+    catalog_id IN (
+      SELECT id FROM capability_catalogs
+      WHERE user_id = auth.uid()
+    )
+  );
+
+-- ── visual_maps ────────────────────────────────────────
+CREATE POLICY "owner_visual_maps" ON visual_maps
+  FOR ALL USING (
+    catalog_id IN (
+      SELECT id FROM capability_catalogs
+      WHERE user_id = auth.uid()
+    )
+  );
+
+-- ── diff_history ───────────────────────────────────────
+CREATE POLICY "owner_diff_history" ON diff_history
+  FOR ALL USING (
+    catalog_id IN (
+      SELECT id FROM capability_catalogs
+      WHERE user_id = auth.uid()
+    )
+  );</div>
+</div>
+
+<div class="card b">
+  <div class="sub" style="margin-top:0;">What RLS means in practice for our 3 users</div>
+  <div class="code">-- Alice queries capabilities — only sees her SWA nodes
+SELECT * FROM capabilities;
+-- Supabase automatically adds:
+-- WHERE catalog_id IN (SELECT id FROM capability_catalogs
+--                      WHERE user_id = 'user-alice-uuid-001')
+-- Result: only cap-001 through cap-004 (SWA nodes)
+-- cap-101 to cap-103 (AMEX) are invisible to Alice
+
+-- Bob queries catalogs — only sees his AMEX catalog
+SELECT * FROM capability_catalogs;
+-- Result: only cat-amex-uuid-002
+-- cat-swa-uuid-001 and cat-takeda-uuid-003 are invisible to Bob</div>
+
+  <div class="row"><div class="d db"></div><div>These policies apply to every query — SELECT, INSERT, UPDATE, DELETE — whether the request comes from the frontend app, a direct API call, or even the Supabase dashboard if accessed by a non-admin user.</div></div>
+  <div class="row"><div class="d db"></div><div>capability_chunks does NOT get RLS — it is a shared knowledge base that all users benefit from. Only catalog ownership tables are isolated.</div></div>
+</div>
+
+<div class="card p">
+  <div class="sub" style="margin-top:0;">Collaboration — when Alice wants Bob to review her SWA map</div>
+  <div class="code">-- catalog_shares enables controlled access
+INSERT INTO catalog_shares (catalog_id, user_id, role)
+VALUES ('cat-swa-uuid-001', 'user-bob-uuid-002', 'viewer');
+
+-- Updated RLS policy for capability_catalogs to include shares:
+CREATE POLICY "owner_or_shared" ON capability_catalogs
+  FOR SELECT USING (
+    user_id = auth.uid()  -- owner
+    OR
+    id IN (               -- shared with this user
+      SELECT catalog_id FROM catalog_shares
+      WHERE user_id = auth.uid()
+    )
+  );</div>
+</div>
+</div>
+
+<!-- TAB 4 — RAG ACROSS CLIENTS -->
+<div class="pane" id="p4">
+<div class="heading">How RAG works across all 3 clients — isolation without silos</div>
+
+<div class="card">
+  <div class="sub" style="margin-top:0;">The RAG knowledge base is shared but filtered — not isolated</div>
+  <div class="row"><div class="d db"></div><div>capability_chunks is a shared table — all industry templates and past client maps go into it. But every query is filtered by industry tag. This is the key design: shared storage, isolated retrieval.</div></div>
+  <div class="row"><div class="d db"></div><div>Alice's Airline prompt never retrieves Banking or Healthcare chunks. Bob's Banking prompt never retrieves Airline or Healthcare chunks. The industry tag is the firewall.</div></div>
+</div>
+
+<div class="card g">
+  <div class="sub" style="margin-top:0;">What the capability_chunks table looks like after all 3 users approve their changes</div>
+  <div class="code">id         | label                   | industry   | source       | content
+-----------|-------------------------|------------|--------------|---------------------------
+-- Pre-loaded industry templates (before any user works):
+tmpl-001   | Risk Management         | Banking    | template     | "Risk Mgmt is an L1..."
+tmpl-002   | Regulatory Compliance   | Banking    | template     | "Regulatory Compliance..."
+tmpl-003   | Loyalty Program         | Airline    | template     | "Loyalty programs in..."
+tmpl-004   | Clinical Operations     | Healthcare | template     | "Clinical Ops covers..."
+
+-- After Alice approves her SWA loyalty additions:
+chunk-A01  | Loyalty Program Mgmt    | Airline    | client_map   | "Loyalty Pgm Mgmt L1..."
+chunk-A02  | Points Management       | Airline    | client_map   | "Points Mgmt is an L2..."
+chunk-A03  | Tier Management         | Airline    | client_map   | "Tier Mgmt handles..."
+
+-- After Bob approves his AMEX risk additions:
+chunk-B01  | Risk Management         | Banking    | client_map   | "Risk Mgmt L1 at banking..."
+chunk-B02  | Credit Risk Management  | Banking    | client_map   | "Credit Risk is L2..."
+chunk-B03  | Operational Risk        | Banking    | client_map   | "Operational Risk covers..."
+
+-- After Carol approves her Takeda clinical additions:
+chunk-C01  | Clinical Operations     | Healthcare | client_map   | "Clinical Ops L1..."
+chunk-C02  | Drug Development Mgmt   | Healthcare | client_map   | "Drug Dev is L2 under..."
+chunk-C03  | Regulatory Affairs      | Healthcare | client_map   | "Regulatory Affairs L2..."
+
+-- NOTE: client names (SWA, AMEX, Takeda) NEVER appear in the content column
+-- They are anonymised. source_catalog_id links back for traceability only.</div>
+</div>
+
+<div class="card b">
+  <div class="sub" style="margin-top:0;">Future user — a 4th consultant works on a new Airline client</div>
+  <div class="code">-- User D (Dave) uploads a new airline client map
+-- Prompt: "Add loyalty and customer retention capabilities"
+-- RAG search:
+SELECT content, label FROM capability_chunks
+WHERE industry = 'Airline'
+ORDER BY embedding <=> $dave_prompt_vector
+LIMIT 5;
+
+-- Results (now benefiting from Alice's SWA work):
+1. "Loyalty Program Mgmt is an L1..."     ← from Alice's SWA map
+2. "Points Management is an L2 under..."  ← from Alice's SWA map
+3. "Tier Management handles Gold/Silver..." ← from Alice's SWA map
+4. "Loyalty programs in airline..."        ← from industry template
+5. "Customer Retention covers..."          ← from industry template
+
+-- Dave's Claude diff now suggests the exact same structure
+-- Alice built at SWA — because it was real, approved, industry work.
+-- Dave gets firm-specific intelligence without knowing it came from SWA.</div>
+</div>
+
+<div class="card a">
+  <div class="sub" style="margin-top:0;">What happens if two users work on the same industry client type concurrently</div>
+  <div class="row"><div class="d da"></div><div>Both users' prompts hit the API simultaneously — no conflict. Each request carries its own catalog_id and industry. They run through the pipeline independently. PostgreSQL handles concurrent inserts to capabilities with row-level locking automatically.</div></div>
+  <div class="row"><div class="d da"></div><div>Both users' approved changes get ingested into capability_chunks independently — new rows are appended, no updates to existing rows, no conflict.</div></div>
+  <div class="row"><div class="d dg"></div><div>The knowledge base gets richer faster when multiple consultants work simultaneously on similar engagements — that is a feature, not a bug.</div></div>
+</div>
+</div>
+
+<!-- TAB 5 — FULL SCHEMA WIRED UP -->
+<div class="pane" id="p5">
+<div class="heading">Full schema — all 7 tables wired for this scenario</div>
+
+<div class="card b">
+  <div class="sub" style="margin-top:0;">Complete CREATE statements — production-ready</div>
+  <div class="code">-- ══════════════════════════════════════════════
+-- FULL SCHEMA — all 7 tables
+-- Wired for multi-user, multi-client scenario
+-- ══════════════════════════════════════════════
+
+-- Prerequisite: enable pgvector
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- ── 1. capability_catalogs ─────────────────
+CREATE TABLE capability_catalogs (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      uuid REFERENCES auth.users(id) ON DELETE CASCADE,
+  name         text NOT NULL,              -- "AMEX Capability Map v1"
+  description  text,
+  client_name  text,                       -- "AMEX" (display only, not used in RAG)
+  industry     text,                       -- "Banking" — sent to RAG filter
+  status       text DEFAULT 'active',      -- "active" | "archived"
+  created_at   timestamptz DEFAULT now(),
+  updated_at   timestamptz DEFAULT now()
+);
+
+-- ── 2. capabilities ────────────────────────
+CREATE TABLE capabilities (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  catalog_id  uuid REFERENCES capability_catalogs(id) ON DELETE CASCADE,
+  parent_id   uuid REFERENCES capabilities(id) ON DELETE SET NULL,
+  level       smallint NOT NULL CHECK (level BETWEEN 0 AND 3),
+  name        text NOT NULL,
+  description text,
+  sort_order  integer DEFAULT 0,
+  source      text DEFAULT 'xlsx_import',  -- "xlsx_import" | "ai_generated"
+  is_deleted  boolean DEFAULT false,        -- soft delete for undo support
+  created_at  timestamptz DEFAULT now(),
+  updated_at  timestamptz DEFAULT now()
+);
+CREATE INDEX ON capabilities(catalog_id);
+CREATE INDEX ON capabilities(parent_id);
+CREATE INDEX ON capabilities(catalog_id, level);
+CREATE INDEX ON capabilities(catalog_id, sort_order);
+
+-- Auto-update updated_at
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN NEW.updated_at = now(); RETURN NEW; END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER capabilities_updated_at
+  BEFORE UPDATE ON capabilities
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- ── 3. visual_maps ─────────────────────────
+CREATE TABLE visual_maps (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  catalog_id     uuid REFERENCES capability_catalogs(id) ON DELETE CASCADE,
+  name           text NOT NULL,
+  version_number integer DEFAULT 1,
+  layout_data    jsonb,                    -- React Flow node/edge positions
+  is_active      boolean DEFAULT true,
+  thumbnail_url  text,
+  created_at     timestamptz DEFAULT now(),
+  updated_at     timestamptz DEFAULT now()
+);
+CREATE INDEX ON visual_maps(catalog_id, is_active);
+
+-- ── 4. diff_history ────────────────────────
+CREATE TABLE diff_history (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  catalog_id    uuid REFERENCES capability_catalogs(id) ON DELETE CASCADE,
+  applied_by    uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  prompt_text   text NOT NULL,
+  diff_payload  jsonb NOT NULL,
+  status        text DEFAULT 'applied',   -- "applied"|"cancelled"|"rolled_back"
+  model_used    text,                     -- "claude-sonnet-4"|"phi-3"|"llama-3-8b"
+  visual_map_id uuid REFERENCES visual_maps(id) ON DELETE SET NULL,
+  created_at    timestamptz DEFAULT now(),
+  applied_at    timestamptz
+);
+CREATE INDEX ON diff_history(catalog_id);
+CREATE INDEX ON diff_history(applied_by);
+
+-- ── 5. capability_chunks (RAG) ─────────────
+CREATE TABLE capability_chunks (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  label             text NOT NULL,
+  level             text NOT NULL,
+  industry          text NOT NULL,         -- the isolation filter
+  content           text NOT NULL,         -- readable text sent to Claude
+  embedding         vector(1536),          -- pgvector column
+  source            text NOT NULL,         -- "template" | "client_map"
+  source_catalog_id uuid REFERENCES capability_catalogs(id) ON DELETE SET NULL,
+  created_at        timestamptz DEFAULT now()
+);
+-- IVFFlat index for fast cosine similarity search
+CREATE INDEX ON capability_chunks
+  USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX ON capability_chunks(industry);
+
+-- ── 6. prompt_sessions ─────────────────────
+CREATE TABLE prompt_sessions (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  catalog_id       uuid REFERENCES capability_catalogs(id) ON DELETE CASCADE,
+  user_id          uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  prompt           text NOT NULL,
+  model_used       text,
+  retry_count      smallint DEFAULT 0,
+  validation_error text,
+  latency_ms       integer,
+  created_at       timestamptz DEFAULT now()
+);
+CREATE INDEX ON prompt_sessions(catalog_id);
+
+-- ── 7. catalog_shares ──────────────────────
+CREATE TABLE catalog_shares (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  catalog_id uuid REFERENCES capability_catalogs(id) ON DELETE CASCADE,
+  user_id    uuid REFERENCES auth.users(id) ON DELETE CASCADE,
+  role       text DEFAULT 'viewer',        -- "viewer"|"editor"|"owner"
+  created_at timestamptz DEFAULT now(),
+  UNIQUE(catalog_id, user_id)
+);
+
+-- ── RLS POLICIES ───────────────────────────
+ALTER TABLE capability_catalogs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE capabilities        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE visual_maps         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE diff_history        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE prompt_sessions     ENABLE ROW LEVEL SECURITY;
+
+-- capability_catalogs: owner or shared
+CREATE POLICY "access_catalogs" ON capability_catalogs
+  FOR ALL USING (
+    user_id = auth.uid() OR
+    id IN (SELECT catalog_id FROM catalog_shares WHERE user_id = auth.uid())
+  );
+
+-- capabilities: scoped via catalog ownership
+CREATE POLICY "access_capabilities" ON capabilities
+  FOR ALL USING (
+    catalog_id IN (
+      SELECT id FROM capability_catalogs
+      WHERE user_id = auth.uid()
+      OR id IN (SELECT catalog_id FROM catalog_shares WHERE user_id = auth.uid())
+    )
+  );
+
+-- visual_maps: same as capabilities
+CREATE POLICY "access_visual_maps" ON visual_maps
+  FOR ALL USING (
+    catalog_id IN (
+      SELECT id FROM capability_catalogs
+      WHERE user_id = auth.uid()
+      OR id IN (SELECT catalog_id FROM catalog_shares WHERE user_id = auth.uid())
+    )
+  );
+
+-- diff_history: same scoping
+CREATE POLICY "access_diff_history" ON diff_history
+  FOR ALL USING (
+    catalog_id IN (
+      SELECT id FROM capability_catalogs WHERE user_id = auth.uid()
+    )
+  );
+
+-- prompt_sessions: user sees only their own
+CREATE POLICY "access_prompt_sessions" ON prompt_sessions
+  FOR ALL USING (user_id = auth.uid());
+
+-- capability_chunks: NO RLS — shared knowledge base
+-- All users benefit from all industry chunks
+-- Client identity is anonymised at ingestion time</div>
+</div>
+
+<div class="verdict verdict-g">
+  This schema handles all 3 users working simultaneously on different clients with the same template — complete data isolation via RLS, shared intelligence via industry-filtered RAG, full audit trail per user per catalog, and collaboration support via catalog_shares when needed.
+</div>
+</div>
+
+</div>
+<script>
+function sw(n){
+  document.querySelectorAll('.tb').forEach(function(b,i){b.classList.toggle('on',i===n);});
+  document.querySelectorAll('.pane').forEach(function(p,i){p.classList.toggle('on',i===n);});
+}
+</script>
+</div>

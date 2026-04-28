@@ -49,10 +49,18 @@ export async function findDuplicateCatalog(rows: ParsedCapabilityRow[]): Promise
  * Creates a new catalog record and returns its ID.
  * This is a single fast INSERT — used to get the catalogId quickly.
  */
-export async function createCatalog(catalogName: string, industry?: string): Promise<string> {
+export async function createCatalog(
+  catalogName: string,
+  opts?: { industry?: string; clientName?: string; userId?: string }
+): Promise<string> {
   const { data: catalog, error } = await supabaseAdmin
     .from("capability_catalogs")
-    .insert({ name: catalogName, industry: industry || null })
+    .insert({
+      name: catalogName,
+      industry: opts?.industry || null,
+      client_name: opts?.clientName || null,
+      user_id: opts?.userId || null,
+    })
     .select("id")
     .single();
 
@@ -68,12 +76,12 @@ export async function insertCapabilitiesForCatalog(
   catalogId: string,
   rows: ParsedCapabilityRow[]
 ) {
-  // Build flat records
+  // Build flat records with full-path keys to handle duplicate names at the same level
   let currentL0Name: string | null = null;
   let currentL1Name: string | null = null;
   let currentL2Name: string | null = null;
 
-  type CapRecord = { name: string; description: string | null; level: number; parentKey: string | null; sort_order: number };
+  type CapRecord = { name: string; description: string | null; level: number; parentKey: string | null; selfKey: string; sort_order: number };
   const records: CapRecord[] = [];
   let sortOrder = 0;
 
@@ -82,24 +90,30 @@ export async function insertCapabilitiesForCatalog(
       currentL0Name = row.l0;
       currentL1Name = null;
       currentL2Name = null;
-      records.push({ name: row.l0, description: row.description, level: 0, parentKey: null, sort_order: sortOrder++ });
+      records.push({ name: row.l0, description: row.description, level: 0, parentKey: null, selfKey: `0:${row.l0}`, sort_order: sortOrder++ });
     }
     if (row.l1) {
       currentL1Name = row.l1;
       currentL2Name = null;
-      records.push({ name: row.l1, description: row.description, level: 1, parentKey: `0:${currentL0Name}`, sort_order: sortOrder++ });
+      const parentKey = `0:${currentL0Name}`;
+      const selfKey = `1:${currentL0Name}/${row.l1}`;
+      records.push({ name: row.l1, description: row.description, level: 1, parentKey, selfKey, sort_order: sortOrder++ });
     }
     if (row.l2) {
       currentL2Name = row.l2;
-      records.push({ name: row.l2, description: row.description, level: 2, parentKey: `1:${currentL1Name}`, sort_order: sortOrder++ });
+      const parentKey = `1:${currentL0Name}/${currentL1Name}`;
+      const selfKey = `2:${currentL0Name}/${currentL1Name}/${row.l2}`;
+      records.push({ name: row.l2, description: row.description, level: 2, parentKey, selfKey, sort_order: sortOrder++ });
     }
     if (row.l3) {
-      records.push({ name: row.l3, description: row.description, level: 3, parentKey: `2:${currentL2Name}`, sort_order: sortOrder++ });
+      const parentKey = `2:${currentL0Name}/${currentL1Name}/${currentL2Name}`;
+      const selfKey = `3:${currentL0Name}/${currentL1Name}/${currentL2Name}/${row.l3}`;
+      records.push({ name: row.l3, description: row.description, level: 3, parentKey, selfKey, sort_order: sortOrder++ });
     }
   }
 
   // Insert level by level so parent_id is resolved from already-inserted rows
-  const nameToId = new Map<string, string>(); // "level:name" → uuid
+  const pathToId = new Map<string, string>(); // full path key → uuid
 
   for (const level of [0, 1, 2, 3]) {
     const levelRecords = records.filter((r) => r.level === level);
@@ -107,7 +121,7 @@ export async function insertCapabilitiesForCatalog(
 
     const insertData = levelRecords.map((r) => ({
       catalog_id: catalogId,
-      parent_id: r.parentKey ? (nameToId.get(r.parentKey) || null) : null,
+      parent_id: r.parentKey ? (pathToId.get(r.parentKey) || null) : null,
       level: r.level,
       name: r.name,
       description: r.description,
@@ -123,7 +137,7 @@ export async function insertCapabilitiesForCatalog(
     if (error) throw new Error("Failed to insert L" + level + " capabilities: " + error.message);
 
     if (data) {
-      data.forEach((row) => nameToId.set(`${row.level}:${row.name}`, row.id));
+      data.forEach((row, i) => pathToId.set(levelRecords[i].selfKey, row.id));
     }
   }
 }
@@ -134,19 +148,20 @@ export async function insertCapabilitiesForCatalog(
 export async function insertCatalogFromRows(
   catalogName: string,
   rows: ParsedCapabilityRow[],
-  industry?: string
+  opts?: { industry?: string; clientName?: string; userId?: string }
 ) {
-  const catalogId = await createCatalog(catalogName, industry);
+  const catalogId = await createCatalog(catalogName, opts);
   await insertCapabilitiesForCatalog(catalogId, rows);
   return catalogId;
 }
 
-/** Fetch all capabilities for a catalog, ordered by sort_order */
+/** Fetch all capabilities for a catalog, ordered by sort_order (excludes soft-deleted) */
 export async function getCatalogCapabilities(catalogId: string) {
   const { data, error } = await supabaseAdmin
     .from("capabilities")
     .select("*")
     .eq("catalog_id", catalogId)
+    .neq("is_deleted", true)
     .order("sort_order", { ascending: true });
 
   if (error) throw new Error("Failed to fetch capabilities: " + error.message);

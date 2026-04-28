@@ -38,6 +38,7 @@ export async function POST(request: NextRequest) {
       .replace(/\s*\(\d+\)\s*$/, "")
       .trim();
     const industry = (formData.get("industry") as string | null) || undefined;
+    const clientName = (formData.get("clientName") as string | null) || undefined;
 
     // 1. Content-based dedup: compare row count + L0 names against existing catalogs
     const existing = await findDuplicateCatalog(rows);
@@ -52,7 +53,8 @@ export async function POST(request: NextRequest) {
     }
 
     // 2. Create catalog record (fast — single insert)
-    const catalogId = await createCatalog(catalogName, industry);
+    // user_id will be set when auth is wired up
+    const catalogId = await createCatalog(catalogName, { industry, clientName });
 
     // 3. Fire-and-forget: insert capabilities in background
     insertCapabilitiesForCatalog(catalogId, rows).catch((err) =>

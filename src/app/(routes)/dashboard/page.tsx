@@ -1,19 +1,39 @@
 ﻿"use client";
 
-import { Suspense } from "react";
+import { Suspense, useState, useCallback, useEffect, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import ReactFlow, {
+  Background,
+  type Node,
+  type NodeChange,
+  applyNodeChanges,
+  ReactFlowProvider,
+} from "reactflow";
+import "reactflow/dist/style.css";
+
+import CapabilityNode from "@/components/canvas/CapabilityNode";
+import type { CapabilityNodeData } from "@/components/canvas/CapabilityNode";
+import LeftSidebar from "@/components/canvas/LeftSidebar";
+import RightSidebar from "@/components/canvas/RightSidebar";
+import CanvasToolbar from "@/components/canvas/CanvasToolbar";
+import { buildCanvasNodes } from "@/lib/canvas/layoutEngine";
+import type { Capability } from "@/types/capability";
+
+const NODE_TYPES = { capability: CapabilityNode };
 
 export default function DashboardCanvasPage() {
   return (
     <Suspense
       fallback={
         <div className="flex min-h-screen items-center justify-center bg-slate-50">
-          <p className="text-sm text-slate-500">Loading...</p>
+          <p className="text-sm text-slate-500">Loading canvas…</p>
         </div>
       }
     >
-      <DashboardContent />
+      <ReactFlowProvider>
+        <DashboardContent />
+      </ReactFlowProvider>
     </Suspense>
   );
 }
@@ -21,39 +41,171 @@ export default function DashboardCanvasPage() {
 function DashboardContent() {
   const searchParams = useSearchParams();
   const catalogId = searchParams.get("catalogId");
-  const exportHref = catalogId
-    ? `/export?catalogId=${encodeURIComponent(catalogId)}`
-    : "/export";
+
+  // Data
+  const [capabilities, setCapabilities] = useState<Capability[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Canvas state
+  const [nodes, setNodes] = useState<Node<CapabilityNodeData>[]>([]);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [visibleLevels, setVisibleLevels] = useState<Set<number>>(
+    new Set([0, 1, 2, 3])
+  );
+  const [interactionMode, setInteractionMode] = useState<"select" | "pan">("select");
+
+  // Fetch capabilities
+  useEffect(() => {
+    if (!catalogId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    fetch(`/api/capabilities?catalogId=${encodeURIComponent(catalogId)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setCapabilities(data);
+        } else {
+          setError(data.error || "Failed to load capabilities");
+        }
+      })
+      .catch(() => setError("Network error"))
+      .finally(() => setLoading(false));
+  }, [catalogId]);
+
+  // Rebuild nodes when capabilities or visible levels change
+  useEffect(() => {
+    if (capabilities.length > 0) {
+      setNodes(buildCanvasNodes(capabilities, visibleLevels));
+    }
+  }, [capabilities, visibleLevels]);
+
+  // Handlers
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
+    []
+  );
+
+  const onNodeClick = useCallback(
+    (_: React.MouseEvent, node: Node<CapabilityNodeData>) =>
+      setSelectedNodeId(node.id),
+    []
+  );
+
+  const onPaneClick = useCallback(() => setSelectedNodeId(null), []);
+
+  const onToggleLevel = useCallback((level: number) => {
+    setVisibleLevels((prev) => {
+      const next = new Set(prev);
+      if (next.has(level)) next.delete(level);
+      else next.add(level);
+      return next;
+    });
+  }, []);
+
+  const onUpdateNode = useCallback(
+    (id: string, patch: Partial<CapabilityNodeData>) => {
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === id ? { ...n, data: { ...n.data, ...patch } } : n
+        )
+      );
+    },
+    []
+  );
+
+  const selectedNode = useMemo(
+    () => (selectedNodeId ? nodes.find((n) => n.id === selectedNodeId) ?? null : null),
+    [selectedNodeId, nodes]
+  );
+
+  // Loading / error states
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+        <p className="text-sm text-slate-500">Loading capabilities…</p>
+      </div>
+    );
+  }
+
+  if (error || !catalogId) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-50">
+        <p className="text-sm text-red-500">{error || "No catalog selected"}</p>
+        <Link href="/" className="text-sm text-brand-600 hover:underline">
+          ← Back to Home
+        </Link>
+      </div>
+    );
+  }
+
+  const exportHref = `/export?catalogId=${encodeURIComponent(catalogId)}`;
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-slate-50">
-      <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-brand-50">
-        <svg className="h-10 w-10 text-brand-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42" />
-        </svg>
-      </div>
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-slate-800">Canvas</h1>
-        <p className="mt-2 text-sm text-slate-500">Yet to be implemented</p>
-        {catalogId && (
-          <p className="mt-1 text-xs text-slate-400">
-            Catalog ID: <span className="font-mono">{catalogId}</span>
-          </p>
-        )}
-      </div>
-      <div className="flex items-center gap-3">
-        <Link
-          href={exportHref}
-          className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 hover:shadow-md active:scale-95"
-        >
-          Export
-        </Link>
-        <Link
-          href="/"
-          className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
-        >
-          &larr; Back to Home
-        </Link>
+    <div className="flex h-screen flex-col overflow-hidden bg-slate-50">
+      {/* Top bar with toolbar */}
+      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-2">
+        <div className="flex items-center gap-3">
+          <Link href="/" className="text-sm font-semibold text-brand-600 hover:underline">
+            ← Home
+          </Link>
+          <span className="text-xs text-slate-400">|</span>
+          <span className="text-sm font-medium text-slate-700">
+            Capability Canvas
+          </span>
+          <span className="text-xs text-slate-400">
+            ({capabilities.length} capabilities)
+          </span>
+        </div>
+
+        {/* Toolbar in header */}
+        <div className="flex items-center gap-3">
+          <CanvasToolbar
+            interactionMode={interactionMode}
+            onModeChange={setInteractionMode}
+          />
+          <Link
+            href={exportHref}
+            className="rounded-lg bg-brand-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-700"
+          >
+            Export
+          </Link>
+        </div>
+      </header>
+
+      {/* Body: left sidebar + canvas + right sidebar */}
+      <div className="flex flex-1 overflow-hidden">
+        <LeftSidebar visibleLevels={visibleLevels} onToggleLevel={onToggleLevel} />
+
+        {/* Canvas area — full space, no overlapping toolbar */}
+        <div className="relative flex-1 overflow-auto">
+          <ReactFlow
+            nodes={nodes}
+            edges={[]}
+            nodeTypes={NODE_TYPES}
+            onNodesChange={onNodesChange}
+            onNodeClick={onNodeClick}
+            onPaneClick={onPaneClick}
+            nodesDraggable={false}
+            panOnDrag
+            panOnScroll
+            zoomOnScroll
+            fitView
+            fitViewOptions={{ padding: 0.3 }}
+            minZoom={0.1}
+            maxZoom={3}
+            proOptions={{ hideAttribution: true }}
+          >
+            <Background gap={20} size={1} color="#e2e8f0" />
+          </ReactFlow>
+        </div>
+
+        <RightSidebar
+          node={selectedNode ? { id: selectedNode.id, data: selectedNode.data } : null}
+          onUpdateNode={onUpdateNode}
+        />
       </div>
     </div>
   );
