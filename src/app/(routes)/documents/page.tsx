@@ -3,6 +3,8 @@
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useCatalogStore } from "@/stores/catalogStore";
+import { convertRowsToCapabilities } from "@/lib/parser/rowsToCapabilities";
 
 const SAMPLE_COLUMNS = [
   { key: "L0", label: "L0", value: "Strategic Portfolio",  bg: "bg-navy-950",  text: "text-white" },
@@ -29,27 +31,36 @@ export default function DocumentsUploadPage() {
   const [saveError, setSaveError]           = useState<string | null>(null);
 
   const submittingRef = useRef(false);
+  const setCatalog = useCatalogStore((s) => s.setCatalog);
 
-  const handleContinue = async () => {
-    if (!uploadedFile || submittingRef.current) return;
+  const handleContinue = () => {
+    if (!uploadedFile || submittingRef.current || !previewRows.length) return;
     submittingRef.current = true;
     setSaving(true);
     setSaveError(null);
     try {
-      const formData = new FormData();
-      formData.append("file", uploadedFile);
-      const res = await fetch("/api/documents", { method: "POST", body: formData });
-      const data = await res.json();
-      if (!res.ok) {
-        setSaveError(data.error || "Upload failed");
+      // Convert preview rows → Capability[] with temp IDs (all client-side)
+      const capabilities = convertRowsToCapabilities(previewHeaders, previewRows, null);
+      if (capabilities.length === 0) {
+        setSaveError("No capabilities found in file.");
         setSaving(false);
         submittingRef.current = false;
         return;
       }
-      // Saved — navigate to canvas (don't reset saving so button stays in loading state)
-      router.push(`/dashboard?catalogId=${data.catalogId}`);
+
+      // Derive catalog name from filename
+      const catalogName = uploadedFile.name
+        .replace(/\.(xlsx|xls|csv)$/i, "")
+        .replace(/\s*\(\d+\)\s*$/, "")
+        .trim();
+
+      // Push to Zustand store (no DB call)
+      setCatalog(catalogName, capabilities);
+
+      // Navigate to canvas
+      router.push("/dashboard");
     } catch {
-      setSaveError("Network error. Please try again.");
+      setSaveError("Failed to process file. Please try again.");
       setSaving(false);
       submittingRef.current = false;
     }

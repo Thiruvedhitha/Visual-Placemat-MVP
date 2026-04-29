@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visual Placemat — Pipeline Deep Dive</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #1c2333;
+    --border: #30363d; --text: #e6edf3; --text2: #8b949e; --text3: #6e7681;
+    --accent: #1545d8; --accent2: #599dff; --green: #3fb950; --orange: #d29922;
+    --navy: #0f1b2d; --blue: #1545d8; --lightblue: #599dff; --pale: #eef5ff;
+    --mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.6; padding: 2rem; max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 24px; font-weight: 600; margin-bottom: 0.5rem; }
+  h2 { font-size: 18px; font-weight: 600; color: var(--accent2); margin: 2rem 0 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 15px; font-weight: 600; margin-bottom: 0.5rem; }
+  p, li { color: var(--text2); }
+  .subtitle { color: var(--text2); font-size: 14px; margin-bottom: 2rem; }
+
+  /* Step cards */
+  .step { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; position: relative; }
+  .step-num { position: absolute; top: -12px; left: 20px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; padding: 3px 12px; border-radius: 12px; letter-spacing: 0.05em; }
+  .step-title { font-size: 16px; font-weight: 600; margin-bottom: 0.75rem; margin-top: 0.25rem; }
+  .step-file { font-family: var(--mono); font-size: 12px; color: var(--accent2); margin-bottom: 1rem; display: inline-block; background: rgba(21,69,216,0.15); padding: 2px 8px; border-radius: 4px; }
+
+  /* IO boxes */
+  .io-grid { display: grid; grid-template-columns: 1fr 60px 1fr; gap: 0; align-items: start; margin-top: 1rem; }
+  .io-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
+  .io-box.input { border-left: 3px solid var(--orange); }
+  .io-box.output { border-left: 3px solid var(--green); }
+  .io-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.5rem; }
+  .io-label.in { color: var(--orange); }
+  .io-label.out { color: var(--green); }
+  .arrow-col { display: flex; align-items: center; justify-content: center; padding-top: 2rem; }
+  .arrow { font-size: 24px; color: var(--text3); }
+
+  /* Code blocks */
+  .code { background: #0d1117; border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; font-family: var(--mono); font-size: 11.5px; line-height: 1.7; overflow-x: auto; white-space: pre; margin: 0.5rem 0; color: var(--text); }
+  .code .k { color: #ff7b72; } /* keywords */
+  .code .s { color: #a5d6ff; } /* strings */
+  .code .c { color: #6e7681; } /* comments */
+  .code .n { color: #d2a8ff; } /* numbers / types */
+  .code .f { color: #79c0ff; } /* functions */
+
+  /* Table */
+  .tbl { width: 100%; border-collapse: collapse; font-size: 12px; margin: 0.5rem 0; }
+  .tbl th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text3); padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  .tbl td { padding: 5px 8px; border-bottom: 1px solid rgba(48,54,61,0.5); color: var(--text2); font-family: var(--mono); font-size: 11px; }
+  .tbl td:first-child { color: var(--text); }
+  .tbl tr:last-child td { border-bottom: none; }
+  .null { color: var(--text3); font-style: italic; }
+
+  /* Canvas diagram */
+  .canvas-demo { background: #1a1f2e; border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin: 1rem 0; overflow-x: auto; }
+  .l0-group { display: inline-flex; flex-direction: column; margin-right: 16px; vertical-align: top; }
+  .l0-header { background: var(--navy); color: #fff; padding: 10px 16px; border-radius: 6px; font-size: 12px; font-weight: 600; text-align: center; margin-bottom: 3px; }
+  .l1-row { display: flex; gap: 6px; }
+  .l1-col { display: flex; flex-direction: column; width: 145px; gap: 3px; }
+  .node { border-radius: 5px; padding: 6px 8px; font-size: 10.5px; font-weight: 500; text-align: center; display: flex; align-items: center; justify-content: center; }
+  .node.l1 { background: var(--blue); color: #fff; height: 48px; }
+  .node.l2 { background: var(--lightblue); color: #fff; height: 48px; }
+  .node.l3 { background: var(--pale); color: #1a1a2e; height: 42px; font-weight: 400; }
+  .l2-gap { height: 6px; }
+
+  /* Flow arrow between steps */
+  .flow-arrow { text-align: center; padding: 0.75rem 0; color: var(--text3); font-size: 20px; }
+
+  /* DB row highlight */
+  .highlight { background: rgba(21,69,216,0.08); }
+
+  /* Process box */
+  .process { background: rgba(21,69,216,0.1); border: 1px dashed var(--accent); border-radius: 8px; padding: 1rem; margin: 0.75rem 0; }
+  .process-title { font-size: 12px; font-weight: 600; color: var(--accent2); margin-bottom: 0.5rem; }
+
+  /* Badge */
+  .badge { display: inline-block; font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 3px; margin-left: 6px; vertical-align: middle; }
+  .badge-fast { background: #1a4731; color: var(--green); }
+  .badge-bg { background: #3d2800; color: var(--orange); }
+  .badge-sync { background: #1a2744; color: var(--accent2); }
+
+  /* Dimension annotations */
+  .dim { font-family: var(--mono); font-size: 10px; color: var(--text3); }
+
+  /* Pipeline overview */
+  .pipeline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 1rem 0 2rem; }
+  .pipe-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; font-size: 12px; font-weight: 500; text-align: center; min-width: 120px; }
+  .pipe-box small { display: block; font-size: 10px; font-weight: 400; color: var(--text3); margin-top: 2px; }
+  .pipe-arrow { color: var(--text3); font-size: 18px; }
+</style>
+</head>
+<body>
+
+<h1>Visual Placemat — Pipeline Deep Dive</h1>
+<p class="subtitle">Complete input → output trace for every stage, using a real example from the SPM Capability catalog.</p>
+
+<!-- Pipeline overview -->
+<div class="pipeline">
+  <div class="pipe-box" style="border-color:var(--orange);">📄 Excel File<small>.xlsx upload</small></div>
+  <div class="pipe-arrow">→</div>
+  <div class="pipe-box">🔍 Parser<small>excelParser.ts</small></div>
+  <div class="pipe-arrow">→</div>
+  <div class="pipe-box">📝 Flat Rows<small>ParsedCapabilityRow[]</small></div>
+  <div class="pipe-arrow">→</div>
+  <div class="pipe-box">💾 DB Insert<small>capabilities.ts</small></div>
+  <div class="pipe-arrow">→</div>
+  <div class="pipe-box">🗃️ Supabase<small>capabilities table</small></div>
+  <div class="pipe-arrow">→</div>
+  <div class="pipe-box">📐 Layout<small>layoutEngine.ts</small></div>
+  <div class="pipe-arrow">→</div>
+  <div class="pipe-box" style="border-color:var(--green);">🎨 React Flow<small>Canvas render</small></div>
+</div>
+
+<!-- ==================== STEP 1 ==================== -->
+<h2>Step 1 — Excel Upload & Parsing</h2>
+
+<div class="step">
+  <div class="step-num">STEP 1</div>
+  <div class="step-title">Parse Excel → Flat Rows</div>
+  <div class="step-file">src/lib/parser/excelParser.ts</div>
+
+  <p style="margin-bottom:1rem;">SheetJS reads the <code>.xlsx</code> buffer. It finds the sheet named "Capability Catalog" (or uses the first sheet), reads the header row to locate L0–L3 columns by regex, then iterates over data rows.</p>
+
+  <div class="io-grid">
+    <div class="io-box input">
+      <div class="io-label in">INPUT — Excel file (3 rows shown)</div>
+      <table class="tbl">
+        <tr><th>L0 Capability Name</th><th>L1 Capability Name</th><th>L2 Capability Name</th><th>L3 Capability Name</th><th>Description</th></tr>
+        <tr><td>Strategy Management</td><td>Portfolio Management</td><td>Portfolio Budget Mgmt</td><td>Budget Definition</td><td>Define budget...</td></tr>
+        <tr><td></td><td></td><td></td><td>Budget Forecasting</td><td>Forecast spend...</td></tr>
+        <tr><td></td><td></td><td>Portfolio Prioritization</td><td></td><td>Prioritize items...</td></tr>
+      </table>
+    </div>
+    <div class="arrow-col"><span class="arrow">→</span></div>
+    <div class="io-box output">
+      <div class="io-label out">OUTPUT — ParsedCapabilityRow[]</div>
+      <div class="code">[
+  {
+    <span class="s">l0</span>: <span class="s">"Strategy Management"</span>,
+    <span class="s">l1</span>: <span class="s">"Portfolio Management"</span>,
+    <span class="s">l2</span>: <span class="s">"Portfolio Budget Mgmt"</span>,
+    <span class="s">l3</span>: <span class="s">"Budget Definition"</span>,
+    <span class="s">description</span>: <span class="s">"Define budget..."</span>
+  },
+  {
+    <span class="s">l0</span>: <span class="null">null</span>,
+    <span class="s">l1</span>: <span class="null">null</span>,
+    <span class="s">l2</span>: <span class="null">null</span>,
+    <span class="s">l3</span>: <span class="s">"Budget Forecasting"</span>,
+    <span class="s">description</span>: <span class="s">"Forecast spend..."</span>
+  },
+  {
+    <span class="s">l0</span>: <span class="null">null</span>,
+    <span class="s">l1</span>: <span class="null">null</span>,
+    <span class="s">l2</span>: <span class="s">"Portfolio Prioritization"</span>,
+    <span class="s">l3</span>: <span class="null">null</span>,
+    <span class="s">description</span>: <span class="s">"Prioritize items..."</span>
+  }
+]</div>
+    </div>
+  </div>
+
+  <div class="process">
+    <div class="process-title">Key logic in the parser</div>
+    <ul style="margin-left:1.5rem;font-size:13px;">
+      <li>Header row scanned with regex: <code>/l0/i</code>, <code>/l1/i</code>, <code>/l2/i</code>, <code>/l3/i</code>, <code>/desc/i</code></li>
+      <li>Empty cells become <code>null</code> — the Excel has merged cells, so only the first row of a group has the L0/L1 value</li>
+      <li>Rows where ALL levels are null are skipped entirely</li>
+      <li>Output is a flat array — no tree structure yet, just raw rows</li>
+    </ul>
+  </div>
+</div>
+
+<div class="flow-arrow">⬇</div>
+
+<!-- ==================== STEP 2 ==================== -->
+<h2>Step 2 — API Route & Dedup Check</h2>
+
+<div class="step">
+  <div class="step-num">STEP 2</div>
+  <div class="step-title">POST /api/documents — Dedup + Create Catalog</div>
+  <div class="step-file">src/app/api/documents/route.ts</div>
+
+  <div class="io-grid">
+    <div class="io-box input">
+      <div class="io-label in">INPUT — FormData</div>
+      <div class="code"><span class="c">// From the upload page:</span>
+formData.file     = <span class="s">SPM_Template.xlsx</span>
+formData.industry = <span class="s">"Technology"</span></div>
+    </div>
+    <div class="arrow-col"><span class="arrow">→</span></div>
+    <div class="io-box output">
+      <div class="io-label out">OUTPUT — JSON Response</div>
+      <div class="code">{
+  <span class="s">"success"</span>: <span class="n">true</span>,
+  <span class="s">"catalogId"</span>: <span class="s">"a494-...-cc62"</span>,
+  <span class="s">"catalogName"</span>: <span class="s">"SPM_Template"</span>,
+  <span class="s">"capabilitiesCount"</span>: <span class="n">47</span>
+}</div>
+    </div>
+  </div>
+
+  <div class="process">
+    <div class="process-title">What happens inside the route</div>
+    <div class="code"><span class="c">// 1. Validate file type (.xlsx, .xls, .csv)</span>
+<span class="c">// 2. Parse buffer → rows[] (Step 1)</span>
+<span class="c">// 3. Strip filename: "SPM_Template (1).xlsx" → "SPM_Template"</span>
+<span class="c">// 4. Content-based dedup:</span>
+<span class="f">findDuplicateCatalog</span>(rows)
+  → counts rows, extracts L0 names, compares against all existing catalogs
+  → if match found → return existing catalogId (no re-insert)
+
+<span class="c">// 5. Create catalog (FAST — single INSERT)</span>  <span class="badge badge-fast">FAST</span>
+<span class="f">createCatalog</span>(<span class="s">"SPM_Template"</span>, { industry: <span class="s">"Technology"</span> })
+  → INSERT INTO capability_catalogs → returns catalogId
+
+<span class="c">// 6. Insert capabilities (BACKGROUND — fire & forget)</span>  <span class="badge badge-bg">BACKGROUND</span>
+<span class="f">insertCapabilitiesForCatalog</span>(catalogId, rows)
+  .catch(err => console.error(err))
+
+<span class="c">// 7. Return catalogId IMMEDIATELY — client navigates to canvas</span></div>
+  </div>
+</div>
+
+<div class="flow-arrow">⬇</div>
+
+<!-- ==================== STEP 3 ==================== -->
+<h2>Step 3 — Level-by-Level DB Insert</h2>
+
+<div class="step">
+  <div class="step-num">STEP 3</div>
+  <div class="step-title">Flat Rows → Tree in Database (parent_id chain)</div>
+  <div class="step-file">src/lib/db/postgres/capabilities.ts → insertCapabilitiesForCatalog()</div>
+
+  <div class="io-grid">
+    <div class="io-box input">
+      <div class="io-label in">INPUT — ParsedCapabilityRow[] (flat, nulls)</div>
+      <div class="code">Row 1: L0=<span class="s">Strategy Mgmt</span>, L1=<span class="s">Portfolio Mgmt</span>, L2=<span class="s">Budget Mgmt</span>, L3=<span class="s">Budget Definition</span>
+Row 2: L0=<span class="null">null</span>,           L1=<span class="null">null</span>,            L2=<span class="null">null</span>,          L3=<span class="s">Budget Forecasting</span>
+Row 3: L0=<span class="null">null</span>,           L1=<span class="null">null</span>,            L2=<span class="s">Prioritization</span>,  L3=<span class="null">null</span></div>
+    </div>
+    <div class="arrow-col"><span class="arrow">→</span></div>
+    <div class="io-box output">
+      <div class="io-label out">OUTPUT — capabilities table (with parent_id tree)</div>
+      <table class="tbl">
+        <tr><th>id</th><th>level</th><th>name</th><th>parent_id</th></tr>
+        <tr class="highlight"><td>uuid-A</td><td>0</td><td>Strategy Mgmt</td><td class="null">null</td></tr>
+        <tr><td>uuid-B</td><td>1</td><td>Portfolio Mgmt</td><td>uuid-A</td></tr>
+        <tr><td>uuid-C</td><td>2</td><td>Budget Mgmt</td><td>uuid-B</td></tr>
+        <tr><td>uuid-D</td><td>3</td><td>Budget Definition</td><td>uuid-C</td></tr>
+        <tr><td>uuid-E</td><td>3</td><td>Budget Forecasting</td><td>uuid-C</td></tr>
+        <tr><td>uuid-F</td><td>2</td><td>Prioritization</td><td>uuid-B</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="process">
+    <div class="process-title">How parent_id is resolved — the key algorithm</div>
+    <div class="code"><span class="c">// Phase 1: Walk rows, track current L0/L1/L2 context</span>
+<span class="c">// Build records with full-path selfKey for uniqueness</span>
+
+Row 1 → L0 appears → currentL0 = <span class="s">"Strategy Mgmt"</span>
+         L1 appears → currentL1 = <span class="s">"Portfolio Mgmt"</span>
+         L2 appears → currentL2 = <span class="s">"Budget Mgmt"</span>
+         L3 appears → record:
+           selfKey  = <span class="s">"3:Strategy Mgmt/Portfolio Mgmt/Budget Mgmt/Budget Definition"</span>
+           parentKey= <span class="s">"2:Strategy Mgmt/Portfolio Mgmt/Budget Mgmt"</span>
+
+Row 2 → Only L3 → currentL0/L1/L2 unchanged (inherited from Row 1)
+         L3 record:
+           selfKey  = <span class="s">"3:Strategy Mgmt/Portfolio Mgmt/Budget Mgmt/Budget Forecasting"</span>
+           parentKey= <span class="s">"2:Strategy Mgmt/Portfolio Mgmt/Budget Mgmt"</span>  <span class="c">← same parent!</span>
+
+Row 3 → Only L2 → currentL2 = <span class="s">"Prioritization"</span>
+         L2 record:
+           selfKey  = <span class="s">"2:Strategy Mgmt/Portfolio Mgmt/Prioritization"</span>
+           parentKey= <span class="s">"1:Strategy Mgmt/Portfolio Mgmt"</span>
+
+<span class="c">// Phase 2: Insert level-by-level (L0 → L1 → L2 → L3)</span>
+<span class="c">// After inserting L0, we have: pathToId["0:Strategy Mgmt"] = uuid-A</span>
+<span class="c">// When inserting L1, look up parentKey "0:Strategy Mgmt" → uuid-A</span>
+<span class="c">// When inserting L2, look up parentKey "1:Strategy Mgmt/Portfolio Mgmt" → uuid-B</span>
+<span class="c">// etc.</span></div>
+  </div>
+
+  <p style="margin-top:1rem;font-size:13px;color:var(--text2);">
+    <strong style="color:var(--text);">Why full-path keys?</strong> If two L2s have the same name under different L1 parents (e.g., "Portfolio Budget Mgmt" under both "Portfolio Mgmt" and "Financial Mgmt"), simple <code>"level:name"</code> keys would collide. Full ancestor paths guarantee uniqueness.
+  </p>
+</div>
+
+<div class="flow-arrow">⬇</div>
+
+<!-- ==================== STEP 4 ==================== -->
+<h2>Step 4 — Fetch Capabilities on Canvas Page</h2>
+
+<div class="step">
+  <div class="step-num">STEP 4</div>
+  <div class="step-title">GET /api/capabilities → Flat rows from Supabase</div>
+  <div class="step-file">src/app/(routes)/dashboard/page.tsx</div>
+
+  <div class="io-grid">
+    <div class="io-box input">
+      <div class="io-label in">INPUT — URL parameter</div>
+      <div class="code"><span class="s">/dashboard?catalogId=a494-...-cc62</span>
+
+<span class="c">// Page calls:</span>
+GET <span class="s">/api/capabilities?catalogId=a494-...-cc62</span></div>
+    </div>
+    <div class="arrow-col"><span class="arrow">→</span></div>
+    <div class="io-box output">
+      <div class="io-label out">OUTPUT — Capability[] from Supabase</div>
+      <div class="code">[
+  { <span class="s">id</span>:<span class="s">"uuid-A"</span>, <span class="s">level</span>:<span class="n">0</span>, <span class="s">name</span>:<span class="s">"Strategy Mgmt"</span>,
+    <span class="s">parent_id</span>:<span class="null">null</span>, <span class="s">sort_order</span>:<span class="n">0</span> },
+  { <span class="s">id</span>:<span class="s">"uuid-B"</span>, <span class="s">level</span>:<span class="n">1</span>, <span class="s">name</span>:<span class="s">"Portfolio Mgmt"</span>,
+    <span class="s">parent_id</span>:<span class="s">"uuid-A"</span>, <span class="s">sort_order</span>:<span class="n">1</span> },
+  { <span class="s">id</span>:<span class="s">"uuid-C"</span>, <span class="s">level</span>:<span class="n">2</span>, <span class="s">name</span>:<span class="s">"Budget Mgmt"</span>,
+    <span class="s">parent_id</span>:<span class="s">"uuid-B"</span>, <span class="s">sort_order</span>:<span class="n">2</span> },
+  { <span class="s">id</span>:<span class="s">"uuid-D"</span>, <span class="s">level</span>:<span class="n">3</span>, <span class="s">name</span>:<span class="s">"Budget Definition"</span>,
+    <span class="s">parent_id</span>:<span class="s">"uuid-C"</span>, <span class="s">sort_order</span>:<span class="n">3</span> },
+  <span class="c">// ... all rows sorted by sort_order</span>
+]</div>
+    </div>
+  </div>
+</div>
+
+<div class="flow-arrow">⬇</div>
+
+<!-- ==================== STEP 5 ==================== -->
+<h2>Step 5 — Layout Engine (Flat Rows → X,Y Positions)</h2>
+
+<div class="step">
+  <div class="step-num">STEP 5</div>
+  <div class="step-title">buildCanvasNodes() — Tree Build → Number → Position</div>
+  <div class="step-file">src/lib/canvas/layoutEngine.ts</div>
+
+  <p style="margin-bottom:1rem;">This is the core algorithm. It takes flat DB rows and produces positioned React Flow nodes. Three sub-steps:</p>
+
+  <!-- Sub-step 5a -->
+  <h3>5a. Build Parent-Child Tree</h3>
+  <div class="io-grid">
+    <div class="io-box input">
+      <div class="io-label in">INPUT — Flat capability rows</div>
+      <div class="code">uuid-A (L0) parent=<span class="null">null</span>
+uuid-B (L1) parent=uuid-A
+uuid-C (L2) parent=uuid-B
+uuid-D (L3) parent=uuid-C
+uuid-E (L3) parent=uuid-C
+uuid-F (L2) parent=uuid-B</div>
+    </div>
+    <div class="arrow-col"><span class="arrow">→</span></div>
+    <div class="io-box output">
+      <div class="io-label out">OUTPUT — TreeNode hierarchy</div>
+      <div class="code">Strategy Mgmt (L0)
+ └─ Portfolio Mgmt (L1)
+     ├─ Budget Mgmt (L2)
+     │   ├─ Budget Definition (L3)
+     │   └─ Budget Forecasting (L3)
+     └─ Prioritization (L2)</div>
+    </div>
+  </div>
+
+  <div style="margin:1.5rem 0;border-top:1px solid var(--border);"></div>
+
+  <!-- Sub-step 5b -->
+  <h3>5b. Assign Hierarchical Numbers</h3>
+  <div class="io-grid">
+    <div class="io-box input">
+      <div class="io-label in">INPUT — Tree (unnumbered)</div>
+      <div class="code">Strategy Mgmt
+ └─ Portfolio Mgmt
+     ├─ Budget Mgmt
+     │   ├─ Budget Definition
+     │   └─ Budget Forecasting
+     └─ Prioritization</div>
+    </div>
+    <div class="arrow-col"><span class="arrow">→</span></div>
+    <div class="io-box output">
+      <div class="io-label out">OUTPUT — Numbered tree</div>
+      <div class="code"><span class="n">1</span>   Strategy Mgmt
+ └─ <span class="n">1.1</span> Portfolio Mgmt
+     ├─ <span class="n">1.1.1</span> Budget Mgmt
+     │   ├─ <span class="n">1.1.1.1</span> Budget Definition
+     │   └─ <span class="n">1.1.1.2</span> Budget Forecasting
+     └─ <span class="n">1.1.2</span> Prioritization</div>
+    </div>
+  </div>
+
+  <div style="margin:1.5rem 0;border-top:1px solid var(--border);"></div>
+
+  <!-- Sub-step 5c -->
+  <h3>5c. Calculate X,Y Positions</h3>
+
+  <div class="process">
+    <div class="process-title">Layout constants</div>
+    <table class="tbl" style="max-width:500px;">
+      <tr><th>Constant</th><th>Value</th><th>Purpose</th></tr>
+      <tr><td>SUB_COL_W</td><td>145px</td><td>Width of each L1 sub-column</td></tr>
+      <tr><td>SUB_COL_GAP</td><td>6px</td><td>Horizontal gap between L1 columns</td></tr>
+      <tr><td>L0_H</td><td>48px</td><td>L0 header node height</td></tr>
+      <tr><td>L1_H</td><td>48px</td><td>L1 node height</td></tr>
+      <tr><td>L2_H</td><td>48px</td><td>L2 node height</td></tr>
+      <tr><td>L3_H</td><td>42px</td><td>L3 node height</td></tr>
+      <tr><td>V_GAP</td><td>3px</td><td>Vertical gap between nodes</td></tr>
+      <tr><td>L2_GAP</td><td>6px</td><td>Extra gap before each L2 block</td></tr>
+      <tr><td>L0_GAP</td><td>16px</td><td>Gap between L0 groups</td></tr>
+      <tr><td>L0_PAD</td><td>6px</td><td>Internal padding of L0 header</td></tr>
+    </table>
+  </div>
+
+  <div class="io-grid" style="margin-top:1rem;">
+    <div class="io-box input">
+      <div class="io-label in">INPUT — Numbered tree</div>
+      <div class="code"><span class="n">1</span>   Strategy Mgmt (L0)
+ └─ <span class="n">1.1</span> Portfolio Mgmt (L1)
+     ├─ <span class="n">1.1.1</span> Budget Mgmt (L2)
+     │   ├─ <span class="n">1.1.1.1</span> Budget Def (L3)
+     │   └─ <span class="n">1.1.1.2</span> Budget Fcst (L3)
+     └─ <span class="n">1.1.2</span> Prioritization (L2)</div>
+    </div>
+    <div class="arrow-col"><span class="arrow">→</span></div>
+    <div class="io-box output">
+      <div class="io-label out">OUTPUT — React Flow Node[] with positions</div>
+      <div class="code">[
+ { id:<span class="s">"uuid-A"</span>, type:<span class="s">"capability"</span>,
+   position: { <span class="n">x: 0</span>, <span class="n">y: 0</span> },       <span class="c">// L0 header</span>
+   data: { label:<span class="s">"Strategy Mgmt"</span>,
+           level:<span class="n">0</span>, colWidth:<span class="n">302</span> }},
+
+ { id:<span class="s">"uuid-B"</span>, type:<span class="s">"capability"</span>,
+   position: { <span class="n">x: 6</span>, <span class="n">y: 51</span> },      <span class="c">// L1 col 1</span>
+   data: { label:<span class="s">"Portfolio Mgmt"</span>,
+           level:<span class="n">1</span> }},
+
+ { id:<span class="s">"uuid-C"</span>, type:<span class="s">"capability"</span>,
+   position: { <span class="n">x: 6</span>, <span class="n">y: 102</span> },     <span class="c">// L2 under L1</span>
+   data: { label:<span class="s">"Budget Mgmt"</span>,
+           level:<span class="n">2</span> }},
+
+ { id:<span class="s">"uuid-D"</span>, type:<span class="s">"capability"</span>,
+   position: { <span class="n">x: 6</span>, <span class="n">y: 153</span> },     <span class="c">// L3 stacked</span>
+   data: { label:<span class="s">"Budget Def"</span>,
+           level:<span class="n">3</span> }},
+
+ { id:<span class="s">"uuid-E"</span>, type:<span class="s">"capability"</span>,
+   position: { <span class="n">x: 6</span>, <span class="n">y: 198</span> },     <span class="c">// L3 stacked</span>
+   data: { label:<span class="s">"Budget Fcst"</span>,
+           level:<span class="n">3</span> }},
+
+ { id:<span class="s">"uuid-F"</span>, type:<span class="s">"capability"</span>,
+   position: { <span class="n">x: 6</span>, <span class="n">y: 249</span> },     <span class="c">// L2 (new block)</span>
+   data: { label:<span class="s">"Prioritization"</span>,
+           level:<span class="n">2</span> }}
+]</div>
+    </div>
+  </div>
+
+  <div class="process">
+    <div class="process-title">Y-position calculation trace</div>
+    <div class="code"><span class="c">// L0 at y=0</span>
+y = <span class="n">0</span>                                        <span class="c">← L0 header</span>
+y = <span class="n">0 + 48(L0_H) + 3(V_GAP) = 51</span>             <span class="c">← L1 node</span>
+y = <span class="n">51 + 48(L1_H) + 3(V_GAP) = 102</span>            <span class="c">← L2: Budget Mgmt</span>
+y = <span class="n">102 + 48(L2_H) + 3(V_GAP) = 153</span>           <span class="c">← L3: Budget Definition</span>
+y = <span class="n">153 + 42(L3_H) + 3(V_GAP) = 198</span>           <span class="c">← L3: Budget Forecasting</span>
+y = <span class="n">198 + 42(L3_H) + 3(V_GAP) + 6(L2_GAP) = 249</span> <span class="c">← L2: Prioritization (new L2 block)</span></div>
+  </div>
+</div>
+
+<div class="flow-arrow">⬇</div>
+
+<!-- ==================== STEP 6 ==================== -->
+<h2>Step 6 — React Flow Renders the Canvas</h2>
+
+<div class="step">
+  <div class="step-num">STEP 6</div>
+  <div class="step-title">Node[] → Visual Placemat on Screen</div>
+  <div class="step-file">src/components/canvas/CapabilityNode.tsx + src/app/(routes)/dashboard/page.tsx</div>
+
+  <div class="io-grid">
+    <div class="io-box input">
+      <div class="io-label in">INPUT — React Flow Node[] (from Step 5)</div>
+      <div class="code">6 nodes with x,y positions,
+level-based colors,
+hierarchical numbers,
+and label text</div>
+    </div>
+    <div class="arrow-col"><span class="arrow">→</span></div>
+    <div class="io-box output">
+      <div class="io-label out">OUTPUT — Rendered Canvas ↓</div>
+    </div>
+  </div>
+
+  <!-- ACTUAL CANVAS DEMO -->
+  <div class="canvas-demo" style="margin-top:1rem;">
+    <div class="l0-group">
+      <div class="l0-header" style="width:302px;">1 &nbsp;Strategy Management</div>
+      <div class="l1-row">
+        <div class="l1-col">
+          <div class="node l1">1.1 Portfolio Management</div>
+          <div class="node l2">1.1.1 Portfolio Budget Mgmt</div>
+          <div class="node l3">1.1.1.1 Budget Definition</div>
+          <div class="node l3">1.1.1.2 Budget Forecasting</div>
+          <div class="l2-gap"></div>
+          <div class="node l2">1.1.2 Prioritization</div>
+        </div>
+        <div class="l1-col">
+          <div class="node l1">1.2 Financial Management</div>
+          <div class="node l2">1.2.1 Cost Management</div>
+          <div class="node l3">1.2.1.1 Cost Estimation</div>
+          <div class="node l3">1.2.1.2 Cost Tracking</div>
+          <div class="l2-gap"></div>
+          <div class="node l2">1.2.2 Revenue Mgmt</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="process">
+    <div class="process-title">Color mapping per level</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:0.5rem;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div style="width:40px;height:24px;border-radius:4px;background:#0f1b2d;"></div>
+        <span style="font-size:12px;">L0 — #0f1b2d (dark navy)</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div style="width:40px;height:24px;border-radius:4px;background:#1545d8;"></div>
+        <span style="font-size:12px;">L1 — #1545d8 (brand blue)</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div style="width:40px;height:24px;border-radius:4px;background:#599dff;"></div>
+        <span style="font-size:12px;">L2 — #599dff (light blue)</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div style="width:40px;height:24px;border-radius:4px;background:#eef5ff;border:1px solid #ccc;"></div>
+        <span style="font-size:12px;">L3 — #eef5ff (pale blue)</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="process" style="margin-top:1rem;">
+    <div class="process-title">CapabilityNode component rendering</div>
+    <div class="code"><span class="c">// Each node receives:</span>
+data.label    → displayed as centered text (2-line clamp)
+data.level    → determines background color + fixed height
+data.number   → "1.1.1" prefix shown before the label
+data.colWidth → only for L0 nodes (spans all L1 sub-columns)
+               → L1/L2/L3 use SUB_COL_W (145px)
+
+<span class="c">// Fixed heights match layout engine exactly:</span>
+L0 = <span class="n">48px</span>,  L1 = <span class="n">48px</span>,  L2 = <span class="n">48px</span>,  L3 = <span class="n">42px</span></div>
+  </div>
+</div>
+
+<div style="margin-top:2rem;border-top:1px solid var(--border);padding-top:1.5rem;">
+  <h2 style="border:none;margin-top:0;">Complete Data Flow — One Row, End to End</h2>
+
+  <div class="step" style="background:var(--surface2);">
+    <h3 style="margin-bottom:1rem;">Tracing "Budget Definition" from Excel cell to canvas pixel</h3>
+
+    <table class="tbl">
+      <tr><th style="width:80px;">Stage</th><th style="width:160px;">Process</th><th>Data</th></tr>
+      <tr>
+        <td style="color:var(--orange);">Excel</td>
+        <td>Cell D2</td>
+        <td><code>"Budget Definition"</code> in the L3 column</td>
+      </tr>
+      <tr>
+        <td style="color:var(--orange);">Parser</td>
+        <td>parseCapabilityCatalog()</td>
+        <td><code>{ l0:"Strategy Mgmt", l1:"Portfolio Mgmt", l2:"Budget Mgmt", l3:"Budget Definition" }</code></td>
+      </tr>
+      <tr>
+        <td style="color:var(--accent2);">Insert</td>
+        <td>insertCapabilitiesForCatalog()</td>
+        <td>selfKey=<code>"3:Strategy Mgmt/Portfolio Mgmt/Budget Mgmt/Budget Definition"</code><br>parentKey=<code>"2:Strategy Mgmt/Portfolio Mgmt/Budget Mgmt"</code> → resolves to uuid-C</td>
+      </tr>
+      <tr>
+        <td style="color:var(--accent2);">Database</td>
+        <td>capabilities table</td>
+        <td><code>{ id:"uuid-D", level:3, name:"Budget Definition", parent_id:"uuid-C", sort_order:3 }</code></td>
+      </tr>
+      <tr>
+        <td style="color:var(--green);">Layout</td>
+        <td>buildCanvasNodes()</td>
+        <td>TreeNode: number=<code>"1.1.1.1"</code>, placed in L1 sub-column at x=6, y=153</td>
+      </tr>
+      <tr>
+        <td style="color:var(--green);">Render</td>
+        <td>CapabilityNode</td>
+        <td>42px tall pale blue box, text=<code>"1.1.1.1 Budget Definition"</code>, centered, 2-line clamp</td>
+      </tr>
+    </table>
+  </div>
+</div>
+
+</body>
+</html>

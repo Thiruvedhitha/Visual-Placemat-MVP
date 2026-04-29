@@ -19,6 +19,7 @@ import RightSidebar from "@/components/canvas/RightSidebar";
 import CanvasToolbar from "@/components/canvas/CanvasToolbar";
 import { buildCanvasNodes } from "@/lib/canvas/layoutEngine";
 import type { Capability } from "@/types/capability";
+import { useCatalogStore } from "@/stores/catalogStore";
 
 const NODE_TYPES = { capability: CapabilityNode };
 
@@ -40,12 +41,22 @@ export default function DashboardCanvasPage() {
 
 function DashboardContent() {
   const searchParams = useSearchParams();
-  const catalogId = searchParams.get("catalogId");
+  const catalogIdParam = searchParams.get("catalogId");
+
+  // Zustand store
+  const storeCapabilities = useCatalogStore((s) => s.capabilities);
+  const storeCatalogId = useCatalogStore((s) => s.catalogId);
+  const catalogName = useCatalogStore((s) => s.catalogName);
+  const isDirty = useCatalogStore((s) => s.isDirty);
+  const loadFromDB = useCatalogStore((s) => s.loadFromDB);
+  const markSaved = useCatalogStore((s) => s.markSaved);
 
   // Data
   const [capabilities, setCapabilities] = useState<Capability[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [applying, setApplying] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
 
   // Canvas state
   const [nodes, setNodes] = useState<Node<CapabilityNodeData>[]>([]);
@@ -55,25 +66,35 @@ function DashboardContent() {
   );
   const [interactionMode, setInteractionMode] = useState<"select" | "pan">("select");
 
-  // Fetch capabilities
+  // Load capabilities: Zustand first, then DB fallback
   useEffect(() => {
-    if (!catalogId) {
+    // If Zustand has capabilities, use those
+    if (storeCapabilities.length > 0) {
+      setCapabilities(storeCapabilities);
+      setLoading(false);
+      return;
+    }
+
+    // Otherwise, try to fetch from DB if catalogId is in the URL
+    if (!catalogIdParam) {
       setLoading(false);
       return;
     }
     setLoading(true);
-    fetch(`/api/capabilities?catalogId=${encodeURIComponent(catalogId)}`)
+    fetch(`/api/capabilities?catalogId=${encodeURIComponent(catalogIdParam)}`)
       .then((r) => r.json())
       .then((data) => {
         if (Array.isArray(data)) {
           setCapabilities(data);
+          // Also populate the Zustand store so edits stay local
+          loadFromDB(catalogIdParam, catalogIdParam, data);
         } else {
           setError(data.error || "Failed to load capabilities");
         }
       })
       .catch(() => setError("Network error"))
       .finally(() => setLoading(false));
-  }, [catalogId]);
+  }, [catalogIdParam, storeCapabilities, loadFromDB]);
 
   // Rebuild nodes when capabilities or visible levels change
   useEffect(() => {
@@ -81,6 +102,33 @@ function DashboardContent() {
       setNodes(buildCanvasNodes(capabilities, visibleLevels));
     }
   }, [capabilities, visibleLevels]);
+
+  // Apply: bulk save to Supabase
+  const handleApply = async () => {
+    setApplying(true);
+    setApplyError(null);
+    try {
+      const res = await fetch("/api/catalogs/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          catalogId: storeCatalogId,
+          catalogName,
+          capabilities,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setApplyError(data.error || "Save failed");
+        return;
+      }
+      markSaved(data.catalogId);
+    } catch {
+      setApplyError("Network error. Please try again.");
+    } finally {
+      setApplying(false);
+    }
+  };
 
   // Handlers
   const onNodesChange = useCallback(
@@ -130,18 +178,20 @@ function DashboardContent() {
     );
   }
 
-  if (error || !catalogId) {
+  if (error || (!catalogIdParam && capabilities.length === 0)) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-50">
-        <p className="text-sm text-red-500">{error || "No catalog selected"}</p>
-        <Link href="/" className="text-sm text-brand-600 hover:underline">
-          ← Back to Home
+        <p className="text-sm text-red-500">{error || "No catalog loaded"}</p>
+        <Link href="/documents" className="text-sm text-brand-600 hover:underline">
+          ← Upload a file
         </Link>
       </div>
     );
   }
 
-  const exportHref = `/export?catalogId=${encodeURIComponent(catalogId)}`;
+  const exportHref = storeCatalogId
+    ? `/export?catalogId=${encodeURIComponent(storeCatalogId)}`
+    : "#";
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-slate-50">
@@ -166,6 +216,32 @@ function DashboardContent() {
             interactionMode={interactionMode}
             onModeChange={setInteractionMode}
           />
+          {applyError && (
+            <p className="text-xs text-red-500">{applyError}</p>
+          )}
+          <button
+            onClick={handleApply}
+            disabled={applying || !isDirty}
+            className={`rounded-lg px-4 py-1.5 text-xs font-semibold shadow-sm transition ${
+              isDirty && !applying
+                ? "bg-green-600 text-white hover:bg-green-700"
+                : "cursor-not-allowed bg-slate-100 text-slate-300"
+            }`}
+          >
+            {applying ? (
+              <span className="flex items-center gap-1.5">
+                <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Saving…
+              </span>
+            ) : isDirty ? (
+              "Apply"
+            ) : (
+              "Saved"
+            )}
+          </button>
           <Link
             href={exportHref}
             className="rounded-lg bg-brand-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-700"
