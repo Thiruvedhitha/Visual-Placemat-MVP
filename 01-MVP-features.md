@@ -38,16 +38,10 @@
 ### 2.1 Create a Catalog
 - User creates a catalog by uploading an Excel file.
 - Optionally provides: client name, catalog name, industry (Banking, Healthcare, Retail, etc.).
-- Industry is passed to the AI pipeline as context for smarter suggestions.
 
 ### 2.2 List Catalogs
 - Dashboard shows all catalogs belonging to the current session.
 - Each catalog card shows: name, industry tag, node count, last updated.
-- **Data isolation:** Catalogs are scoped to the session ID — no user can see another user's catalogs.
-
-### 2.3 Archive a Catalog
-- User can archive a catalog (hides it from the dashboard).
-- No hard delete — archived catalogs can be restored.
 
 ---
 
