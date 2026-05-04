@@ -33,8 +33,13 @@ body {
   border-radius: 4px;
 }
 
-/* Smooth transitions */
-a,
-button {
-  transition: all 0.15s ease-in-out;
+/* Strip React Flow default styling from drop-container nodes so their
+   own background colour shows through without a white wrapper */
+/* Strip React Flow's white wrapper from drop-container nodes so capsule colours show through */
+.react-flow__node.drop-container-node {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
 }

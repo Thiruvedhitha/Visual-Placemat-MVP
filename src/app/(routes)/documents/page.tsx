@@ -57,8 +57,8 @@ export default function DocumentsUploadPage() {
       // Push to Zustand store (no DB call)
       setCatalog(catalogName, capabilities);
 
-      // Navigate to canvas
-      router.push("/dashboard");
+      // Navigate to canvas and reset scroll position.
+      router.push("/dashboard", { scroll: true });
     } catch {
       setSaveError("Failed to process file. Please try again.");
       setSaving(false);
