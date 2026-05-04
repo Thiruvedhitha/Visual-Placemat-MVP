@@ -50,6 +50,7 @@ function DashboardContent() {
   const isDirty = useCatalogStore((s) => s.isDirty);
   const loadFromDB = useCatalogStore((s) => s.loadFromDB);
   const markSaved = useCatalogStore((s) => s.markSaved);
+  const updateCapabilitiesInStore = useCatalogStore((s) => s.setCapabilities);
 
   // Data
   const [capabilities, setCapabilities] = useState<Capability[]>([]);
@@ -96,10 +97,18 @@ function DashboardContent() {
       .finally(() => setLoading(false));
   }, [catalogIdParam, storeCapabilities, loadFromDB]);
 
-  // Rebuild nodes when capabilities or visible levels change
+  // Rebuild nodes when capabilities or visible levels change (preserving visual state)
   useEffect(() => {
     if (capabilities.length > 0) {
-      setNodes(buildCanvasNodes(capabilities, visibleLevels));
+      const rebuilt = buildCanvasNodes(capabilities, visibleLevels);
+      setNodes((prev) => {
+        const prevById = new Map(prev.map((n) => [n.id, n.data]));
+        return rebuilt.map((n) => {
+          const prevData = prevById.get(n.id);
+          if (!prevData) return n;
+          return { ...n, data: { ...n.data, fill: prevData.fill, border: prevData.border, note: prevData.note } };
+        });
+      });
     }
   }, [capabilities, visibleLevels]);
 
@@ -162,6 +171,110 @@ function DashboardContent() {
       );
     },
     []
+  );
+
+  // Helper: update both local state and Zustand store
+  const updateCapabilities = useCallback(
+    (updated: Capability[]) => {
+      setCapabilities(updated);
+      updateCapabilitiesInStore(updated);
+    },
+    [updateCapabilitiesInStore]
+  );
+
+  const onReparent = useCallback(
+    (nodeId: string, newParentId: string) => {
+      updateCapabilities(
+        capabilities.map((c) =>
+          c.id === nodeId ? { ...c, parent_id: newParentId, updated_at: new Date().toISOString() } : c
+        )
+      );
+    },
+    [capabilities, updateCapabilities]
+  );
+
+  const onDeleteCascade = useCallback(
+    (nodeId: string) => {
+      const toDelete = new Set<string>();
+      const queue = [nodeId];
+      while (queue.length) {
+        const id = queue.shift()!;
+        toDelete.add(id);
+        capabilities.forEach((c) => { if (c.parent_id === id) queue.push(c.id); });
+      }
+      updateCapabilities(capabilities.filter((c) => !toDelete.has(c.id)));
+      if (selectedNodeId && toDelete.has(selectedNodeId)) setSelectedNodeId(null);
+    },
+    [capabilities, updateCapabilities, selectedNodeId]
+  );
+
+  const onDetachChildren = useCallback(
+    (nodeId: string) => {
+      updateCapabilities(
+        capabilities.map((c) =>
+          c.parent_id === nodeId ? { ...c, parent_id: null, updated_at: new Date().toISOString() } : c
+        )
+      );
+    },
+    [capabilities, updateCapabilities]
+  );
+
+  const onRenameCapability = useCallback(
+    (nodeId: string, name: string) => {
+      updateCapabilities(
+        capabilities.map((c) =>
+          c.id === nodeId ? { ...c, name, updated_at: new Date().toISOString() } : c
+        )
+      );
+    },
+    [capabilities, updateCapabilities]
+  );
+
+  const onAddChild = useCallback(
+    (parentId: string, childName: string) => {
+      const parent = capabilities.find((c) => c.id === parentId);
+      if (!parent || parent.level >= 3) return;
+      const newCap: Capability = {
+        id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        catalog_id: storeCatalogId || "",
+        parent_id: parentId,
+        level: (parent.level + 1) as 0 | 1 | 2 | 3,
+        name: childName,
+        description: null,
+        sort_order: capabilities.filter((c) => c.parent_id === parentId).length,
+        source: "manual",
+        is_deleted: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      updateCapabilities([...capabilities, newCap]);
+    },
+    [capabilities, storeCatalogId, updateCapabilities]
+  );
+
+  const onDetachChild = useCallback(
+    (childId: string) => {
+      updateCapabilities(
+        capabilities.map((c) =>
+          c.id === childId ? { ...c, parent_id: null, updated_at: new Date().toISOString() } : c
+        )
+      );
+    },
+    [capabilities, updateCapabilities]
+  );
+
+  const onDeleteChild = useCallback(
+    (childId: string) => {
+      const toDelete = new Set<string>();
+      const queue = [childId];
+      while (queue.length) {
+        const id = queue.shift()!;
+        toDelete.add(id);
+        capabilities.forEach((c) => { if (c.parent_id === id) queue.push(c.id); });
+      }
+      updateCapabilities(capabilities.filter((c) => !toDelete.has(c.id)));
+    },
+    [capabilities, updateCapabilities]
   );
 
   const selectedNode = useMemo(
@@ -253,7 +366,7 @@ function DashboardContent() {
 
       {/* Body: left sidebar + canvas + right sidebar */}
       <div className="flex flex-1 overflow-hidden">
-        <LeftSidebar visibleLevels={visibleLevels} onToggleLevel={onToggleLevel} />
+        <LeftSidebar visibleLevels={visibleLevels} onToggleLevel={onToggleLevel} activeCatalogId={storeCatalogId} />
 
         {/* Canvas area — full space, no overlapping toolbar */}
         <div className="relative flex-1 overflow-auto">
@@ -280,7 +393,15 @@ function DashboardContent() {
 
         <RightSidebar
           node={selectedNode ? { id: selectedNode.id, data: selectedNode.data } : null}
+          capabilities={capabilities}
           onUpdateNode={onUpdateNode}
+          onReparent={onReparent}
+          onDeleteCascade={onDeleteCascade}
+          onDetachChildren={onDetachChildren}
+          onRenameCapability={onRenameCapability}
+          onAddChild={onAddChild}
+          onDetachChild={onDetachChild}
+          onDeleteChild={onDeleteChild}
         />
       </div>
     </div>
