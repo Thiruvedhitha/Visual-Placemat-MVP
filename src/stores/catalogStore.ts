@@ -35,6 +35,9 @@ export interface CatalogActions {
 
   /** Replace capabilities array (e.g. after edit) */
   setCapabilities: (capabilities: Capability[]) => void;
+
+  /** Rename a single capability in the store */
+  renameCapability: (id: string, newName: string) => void;
 }
 
 const initialState: CatalogState = {
@@ -76,6 +79,14 @@ export const useCatalogStore = create<CatalogState & CatalogActions>()(
 
       setCapabilities: (capabilities) =>
         set({ capabilities, isDirty: true }),
+
+      renameCapability: (id, newName) =>
+        set((state) => ({
+          capabilities: state.capabilities.map((c) =>
+            c.id === id ? { ...c, name: newName } : c
+          ),
+          isDirty: true,
+        })),
     }),
     {
       name: "visual-placemat-catalog",

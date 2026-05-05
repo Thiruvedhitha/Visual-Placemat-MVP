@@ -22,6 +22,8 @@ import RightSidebar from "@/components/canvas/RightSidebar";
 import CanvasToolbar from "@/components/canvas/CanvasToolbar";
 import { buildCanvasNodes } from "@/lib/canvas/layoutEngine";
 import { handleNodeDragDrop } from "@/lib/canvas/dragDropHandler";
+import { executeCommands } from "@/lib/commands/executor";
+import type { NodeStylePatch } from "@/lib/commands/index";
 import type { Capability } from "@/types/capability";
 import { useCatalogStore } from "@/stores/catalogStore";
 
@@ -72,6 +74,8 @@ function DashboardContent() {
   const [dragMessage, setDragMessage] = useState<string | null>(null);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [hoveredContainerNodeId, setHoveredContainerNodeId] = useState<string | null>(null);
+  /** Per-node visual overrides (fill / border / note) from manual edits or AI */
+  const [nodeStyles, setNodeStyles] = useState<Record<string, NodeStylePatch>>({});
 
   // Load capabilities: Zustand first, then DB fallback
   useEffect(() => {
@@ -322,7 +326,7 @@ function DashboardContent() {
 
       // Find the nearest sibling above the drop Y for precise insertion position.
       // Falls back to placement.insertAfterNodeId (end of list) when Y is unavailable.
-      let insertAfterNodeId = placement.insertAfterNodeId;
+      let insertAfterNodeId: string | null = placement.insertAfterNodeId ?? null;
       if (clientY != null && placement.newParentId && typeof document !== "undefined") {
         const siblings = capabilities
           .filter((c) => c.parent_id === placement.newParentId && c.id !== draggedNodeId)
@@ -342,7 +346,7 @@ function DashboardContent() {
           }
         }
 
-        insertAfterNodeId = bestId as string | null; // null = insert at beginning of the list
+        insertAfterNodeId = bestId ?? null; // null = insert at beginning of the list
       }
 
       const result = handleNodeDragDrop(
@@ -453,39 +457,6 @@ function DashboardContent() {
     [getDropTargetFromPoint]
   );
 
-  const rebuildInteractiveNodes = useCallback(() => {
-    if (capabilities.length === 0) {
-      setNodes([]);
-      return;
-    }
-
-    const nextNodes = buildCanvasNodes(capabilities, visibleLevels).map((node) => ({
-      ...node,
-      draggable: node.type === "capability",
-      // Give container nodes a CSS class so globals.css can strip RF's white wrapper
-      className: node.type === "dropContainer" ? "drop-container-node" : undefined,
-      // Containers keep their level-specific z-index: L1=-2, L2=-1, L3=0 → nested back-to-front.
-      // Capability nodes always render above all containers.
-      zIndex: node.type === "capability" ? 2 : (node.zIndex ?? 0),
-      // Keep the selected node highlighted (orange ring) even after a drop
-      selected: node.type === "capability" && node.id === selectedNodeId,
-      data: {
-        ...node.data,
-        ...(node.type === "capability"
-          ? {
-              canDrag: true,
-              isDragging: node.id === draggingNodeId,
-              isDropTarget: false,
-            }
-          : {
-              isActive: node.id === hoveredContainerNodeId,
-            }),
-      },
-    }));
-
-    setNodes(nextNodes);
-  }, [capabilities, draggingNodeId, hoveredContainerNodeId, selectedNodeId, visibleLevels]);
-
   const onNodeDragStop: NodeDragHandler = useCallback(
     (event, node) => {
       const draggedCap = capabilities.find((c) => c.id === node.id);
@@ -497,15 +468,16 @@ function DashboardContent() {
       if (result?.presetLevel != null && result.targetId) {
         const levelToUse = (draggedCap?.level ?? result.presetLevel) as 0 | 1 | 2 | 3;
         performDrop(node.id, result.targetId, levelToUse, event.clientY);
-      } else {
-        rebuildInteractiveNodes();
       }
+      // No drop target: draggingNodeId just became null, which triggers the useEffect rebuild
     },
-    [capabilities, getDropTargetFromPoint, performDrop, rebuildInteractiveNodes]
+    [capabilities, getDropTargetFromPoint, performDrop]
   );
 
   const onUpdateNode = useCallback(
     (id: string, patch: Partial<CapabilityNodeData>) => {
+      // Persist visual overrides so they survive canvas rebuilds
+      setNodeStyles((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
       setNodes((nds) =>
         nds.map((n) =>
           n.id === id ? { ...n, data: { ...n.data, ...patch } } : n
@@ -515,10 +487,124 @@ function DashboardContent() {
     []
   );
 
-  // Rebuild nodes when capabilities or visible levels change
+  /** Re-parent a node from the right sidebar parent dropdown */
+  const onReparent = useCallback(
+    (nodeId: string, newParentId: string) => {
+      const result = handleNodeDragDrop(nodeId, newParentId, null, capabilities);
+      if (result.message.includes("Cannot")) {
+        setDragMessage("❌ " + result.message);
+        setTimeout(() => setDragMessage(null), 3000);
+      } else {
+        setCapabilities(result.updatedCapabilities);
+        useCatalogStore.setState({
+          capabilities: result.updatedCapabilities,
+          isDirty: true,
+        });
+        setDragMessage("✅ " + result.message);
+        setTimeout(() => setDragMessage(null), 3000);
+      }
+    },
+    [capabilities]
+  );
+
+  /** Detach a child from its current parent (sidebar unlink button) */
+  const onDetachChild = useCallback(
+    (childId: string) => {
+      const updated = capabilities.map((c) =>
+        c.id === childId ? { ...c, parent_id: null } : c
+      );
+      setCapabilities(updated);
+      useCatalogStore.setState({ capabilities: updated, isDirty: true });
+    },
+    [capabilities]
+  );
+
+  /** Permanently delete a node and cascade-remove all its descendants */
+  const onDeleteChild = useCallback(
+    (childId: string) => {
+      // Collect full subtree via BFS
+      const toDelete = new Set<string>();
+      const queue = [childId];
+      while (queue.length > 0) {
+        const id = queue.shift()!;
+        toDelete.add(id);
+        capabilities
+          .filter((c) => c.parent_id === id)
+          .forEach((c) => queue.push(c.id));
+      }
+      const updated = capabilities.filter((c) => !toDelete.has(c.id));
+      setCapabilities(updated);
+      // Also clear selected node if it was deleted
+      if (toDelete.has(selectedNodeId ?? "")) setSelectedNodeId(null);
+      useCatalogStore.setState({ capabilities: updated, isDirty: true });
+    },
+    [capabilities, selectedNodeId]
+  );
+
+  /** Permanently delete the currently selected node and all its descendants */
+  const onDeleteNode = useCallback(
+    (nodeId: string) => {
+      const toDelete = new Set<string>();
+      const queue = [nodeId];
+      while (queue.length > 0) {
+        const id = queue.shift()!;
+        toDelete.add(id);
+        capabilities
+          .filter((c) => c.parent_id === id)
+          .forEach((c) => queue.push(c.id));
+      }
+      const updated = capabilities.filter((c) => !toDelete.has(c.id));
+      setCapabilities(updated);
+      setSelectedNodeId(null);
+      useCatalogStore.setState({ capabilities: updated, isDirty: true });
+    },
+    [capabilities]
+  );
+
+  /** Execute AI-generated commands from /api/transform */
+  const applyAICommands = useCallback(
+    (commands: import("@/lib/commands/index").DiagramCommand[]) => {
+      const result = executeCommands(commands, capabilities, nodeStyles);
+      setCapabilities(result.capabilities);
+      setNodeStyles(result.nodePatches);
+      useCatalogStore.setState({
+        capabilities: result.capabilities,
+        isDirty: true,
+      });
+      if (result.errors.length > 0) {
+        setDragMessage("⚠️ " + result.errors[0]);
+        setTimeout(() => setDragMessage(null), 4000);
+      } else if (result.messages.length > 0) {
+        setDragMessage("✅ " + result.messages.join("; "));
+        setTimeout(() => setDragMessage(null), 3000);
+      }
+    },
+    [capabilities, nodeStyles]
+  );
+
+  // Rebuild nodes when capabilities or visible levels change, merging persisted styles
   useEffect(() => {
-    rebuildInteractiveNodes();
-  }, [rebuildInteractiveNodes]);
+    if (capabilities.length === 0) {
+      setNodes([]);
+      return;
+    }
+    const nextNodes = buildCanvasNodes(capabilities, visibleLevels).map((node) => ({
+      ...node,
+      draggable: node.type === "capability",
+      className: node.type === "dropContainer" ? "drop-container-node" : undefined,
+      zIndex: node.type === "capability" ? 2 : (node.zIndex ?? 0),
+      selected: node.type === "capability" && node.id === selectedNodeId,
+      data: {
+        ...node.data,
+        // Merge persisted visual overrides
+        ...(node.type === "capability" ? (nodeStyles[node.id] ?? {}) : {}),
+        ...(node.type === "capability"
+          ? { canDrag: true, isDragging: node.id === draggingNodeId, isDropTarget: false }
+          : { isActive: node.id === hoveredContainerNodeId }),
+      },
+    }));
+    setNodes(nextNodes);
+  }, [capabilities, draggingNodeId, hoveredContainerNodeId, nodeStyles, selectedNodeId, visibleLevels]);
 
   // Apply: bulk save to Supabase
   const handleApply = async () => {
@@ -676,7 +762,12 @@ function DashboardContent() {
               ? { id: selectedNode.id, data: selectedNode.data as import("@/components/canvas/CapabilityNode").CapabilityNodeData }
               : null
           }
+          capabilities={capabilities}
           onUpdateNode={onUpdateNode}
+          onReparent={onReparent}
+          onDetachChild={onDetachChild}
+          onDeleteChild={onDeleteChild}
+          onDeleteNode={onDeleteNode}
         />
       </div>
 
