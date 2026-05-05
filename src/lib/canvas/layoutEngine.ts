@@ -215,46 +215,49 @@ export function buildCanvasNodes(
         });
         cursorY += capH(l2.cap) + V_GAP;
 
-        // L2 container starts HERE — only wraps L3 children (like L1 container starts after L1 node)
-        const l2ContainerTop = cursorY;
-
+        // L2 container + L3 nodes — only rendered when L3 level is visible
         const l3Children = l2.children.filter((c) => visibleLevels.has(c.cap.level));
-        for (const l3 of l3Children) {
-          const l3Parent = l3.cap.parent_id ? byId.get(l3.cap.parent_id) : null;
+        if (l3Children.length > 0) {
+          // Container starts here, after the L2 node
+          const l2ContainerTop = cursorY;
+
+          for (const l3 of l3Children) {
+            const l3Parent = l3.cap.parent_id ? byId.get(l3.cap.parent_id) : null;
+            nodes.push({
+              id: l3.cap.id,
+              type: "capability",
+              position: { x: subX, y: cursorY },
+              data: {
+                label: l3.cap.name,
+                level: 3,
+                parentName: l3Parent?.name ?? null,
+                description: l3.cap.description,
+                number: l3.number,
+                nodeHeight: capH(l3.cap),
+              },
+            });
+            cursorY += capH(l3.cap) + L3_V_GAP;
+          }
+
+          // L2 light-blue container — only when there are visible L3 nodes
+          const l2ContainerH = cursorY - l2ContainerTop;
           nodes.push({
-            id: l3.cap.id,
-            type: "capability",
-            position: { x: subX, y: cursorY },
+            id: `drop-l2-${l2.cap.id}`,
+            type: "dropContainer",
+            position: { x: subX - CONTAINER_PAD / 2, y: l2ContainerTop - CONTAINER_PAD / 2 },
+            draggable: false,
+            selectable: false,
+            connectable: false,
+            zIndex: -1,
             data: {
-              label: l3.cap.name,
-              level: 3,
-              parentName: l3Parent?.name ?? null,
-              description: l3.cap.description,
-              number: l3.number,
-              nodeHeight: capH(l3.cap),
+              label: "Drop as L2",
+              dropLevel: 2,
+              targetNodeId: l2.cap.id,
+              width: SUB_COL_W + CONTAINER_PAD,
+              height: Math.max(l2ContainerH + CONTAINER_PAD, MIN_CONTAINER_H),
             },
           });
-          cursorY += capH(l3.cap) + L3_V_GAP;
         }
-
-        // L2 light-blue container — wraps only L3 nodes
-        const l2ContainerH = cursorY - l2ContainerTop;
-        nodes.push({
-          id: `drop-l2-${l2.cap.id}`,
-          type: "dropContainer",
-          position: { x: subX - CONTAINER_PAD / 2, y: l2ContainerTop - CONTAINER_PAD / 2 },
-          draggable: false,
-          selectable: false,
-          connectable: false,
-          zIndex: -1,
-          data: {
-            label: "Drop as L2",
-            dropLevel: 2,
-            targetNodeId: l2.cap.id,
-            width: SUB_COL_W + CONTAINER_PAD,
-            height: Math.max(l2ContainerH + CONTAINER_PAD, MIN_CONTAINER_H),
-          },
-        });
       }
 
       // Per-L1-sub-column gray container — wraps ALL L2 panels for this L1.
