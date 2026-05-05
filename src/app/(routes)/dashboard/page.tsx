@@ -10,13 +10,12 @@ import ReactFlow, {
   type NodeDragHandler,
   applyNodeChanges,
   ReactFlowProvider,
+  useReactFlow,
 } from "reactflow";
 import "reactflow/dist/style.css";
 
 import CapabilityNode from "@/components/canvas/CapabilityNode";
 import type { CapabilityNodeData } from "@/components/canvas/CapabilityNode";
-import DropContainerNode from "@/components/canvas/DropContainerNode";
-import type { DropContainerNodeData } from "@/components/canvas/DropContainerNode";
 import LeftSidebar from "@/components/canvas/LeftSidebar";
 import RightSidebar from "@/components/canvas/RightSidebar";
 import CanvasToolbar from "@/components/canvas/CanvasToolbar";
@@ -25,7 +24,7 @@ import { handleNodeDragDrop } from "@/lib/canvas/dragDropHandler";
 import type { Capability } from "@/types/capability";
 import { useCatalogStore } from "@/stores/catalogStore";
 
-const NODE_TYPES = { capability: CapabilityNode, dropContainer: DropContainerNode };
+const NODE_TYPES = { capability: CapabilityNode };
 
 export default function DashboardCanvasPage() {
   return (
@@ -63,15 +62,16 @@ function DashboardContent() {
   const [applyError, setApplyError] = useState<string | null>(null);
 
   // Canvas state
-  const [nodes, setNodes] = useState<Node<CapabilityNodeData | DropContainerNodeData>[]>([]);
+  const [nodes, setNodes] = useState<Node<CapabilityNodeData>[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [visibleLevels, setVisibleLevels] = useState<Set<number>>(
     new Set([0, 1, 2, 3])
   );
   const [interactionMode, setInteractionMode] = useState<"select" | "pan">("select");
   const [dragMessage, setDragMessage] = useState<string | null>(null);
-  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
-  const [hoveredContainerNodeId, setHoveredContainerNodeId] = useState<string | null>(null);
+  const [dropIndicator, setDropIndicator] = useState<{ x: number; y: number; width: number; targetId: string; mode: "after" | "into"; insertAfterId: string | null; newParentId: string | null } | null>(null);
+
+  const { getIntersectingNodes, getNode } = useReactFlow();
 
   // Load capabilities: Zustand first, then DB fallback
   useEffect(() => {
@@ -114,7 +114,7 @@ function DashboardContent() {
   );
 
   const onNodeClick = useCallback(
-    (_: React.MouseEvent, node: Node<CapabilityNodeData | DropContainerNodeData>) => {
+    (_: React.MouseEvent, node: Node<CapabilityNodeData>) => {
       if (node.type === "capability") {
         setSelectedNodeId(node.id);
       }
@@ -135,324 +135,6 @@ function DashboardContent() {
 
 
 
-  const findClosestAncestorAtLevel = useCallback(
-    (startNode: Capability, targetLevel: 0 | 1 | 2 | 3) => {
-      let current: Capability | undefined = startNode;
-
-      while (current) {
-        if (current.level === targetLevel) {
-          return current;
-        }
-        current = current.parent_id
-          ? capabilities.find((cap) => cap.id === current?.parent_id)
-          : undefined;
-      }
-
-      return null;
-    },
-    [capabilities]
-  );
-
-  const findLastChildAtLevel = useCallback(
-    (parentId: string, level: 0 | 1 | 2 | 3) => {
-      const children = capabilities
-        .filter((cap) => cap.parent_id === parentId && cap.level === level)
-        .sort((a, b) => b.sort_order - a.sort_order);
-
-      return children[0] ?? null;
-    },
-    [capabilities]
-  );
-
-  const findDescendantsAtLevel = useCallback(
-    (startNodeId: string, level: 0 | 1 | 2 | 3) => {
-      const queue = [startNodeId];
-      const descendants: Capability[] = [];
-
-      while (queue.length > 0) {
-        const currentId = queue.shift()!;
-        const children = capabilities
-          .filter((cap) => cap.parent_id === currentId)
-          .sort((a, b) => a.sort_order - b.sort_order);
-
-        for (const child of children) {
-          if (child.level === level) {
-            descendants.push(child);
-          }
-          queue.push(child.id);
-        }
-      }
-
-      return descendants;
-    },
-    [capabilities]
-  );
-
-  const resolveDropPlacement = useCallback(
-    (targetNode: Capability, selectedLevel: 0 | 1 | 2 | 3) => {
-      if (selectedLevel === 0) {
-        const rootTarget = findClosestAncestorAtLevel(targetNode, 0);
-        return {
-          newParentId: null,
-          insertAfterNodeId: rootTarget?.id ?? targetNode.id,
-        };
-      }
-
-      if (targetNode.level === selectedLevel) {
-        return {
-          newParentId: targetNode.parent_id,
-          insertAfterNodeId: targetNode.id,
-        };
-      }
-
-      if (selectedLevel === 1) {
-        if (targetNode.level === 0) {
-          const lastChild = findLastChildAtLevel(targetNode.id, 1);
-          return {
-            newParentId: targetNode.id,
-            insertAfterNodeId: lastChild?.id ?? null,
-          };
-        }
-
-        const l1Target = findClosestAncestorAtLevel(targetNode, 1);
-        if (l1Target) {
-          return {
-            newParentId: l1Target.parent_id,
-            insertAfterNodeId: l1Target.id,
-          };
-        }
-
-        const rootTarget = findClosestAncestorAtLevel(targetNode, 0);
-        if (rootTarget) {
-          const lastChild = findLastChildAtLevel(rootTarget.id, 1);
-          return {
-            newParentId: rootTarget.id,
-            insertAfterNodeId: lastChild?.id ?? null,
-          };
-        }
-      }
-
-      if (selectedLevel === 2) {
-        if (targetNode.level === 1) {
-          const lastChild = findLastChildAtLevel(targetNode.id, 2);
-          return {
-            newParentId: targetNode.id,
-            insertAfterNodeId: lastChild?.id ?? null,
-          };
-        }
-
-        const l2Target = findClosestAncestorAtLevel(targetNode, 2);
-        if (l2Target) {
-          return {
-            newParentId: l2Target.parent_id,
-            insertAfterNodeId: l2Target.id,
-          };
-        }
-
-        const l1Container = targetNode.level < 1
-          ? findDescendantsAtLevel(targetNode.id, 1).at(-1) ?? null
-          : findClosestAncestorAtLevel(targetNode, 1);
-        if (l1Container) {
-          const lastChild = findLastChildAtLevel(l1Container.id, 2);
-          return {
-            newParentId: l1Container.id,
-            insertAfterNodeId: lastChild?.id ?? null,
-          };
-        }
-      }
-
-      if (selectedLevel === 3) {
-        if (targetNode.level === 2) {
-          const lastChild = findLastChildAtLevel(targetNode.id, 3);
-          return {
-            newParentId: targetNode.id,
-            insertAfterNodeId: lastChild?.id ?? null,
-          };
-        }
-
-        const l3Target = findClosestAncestorAtLevel(targetNode, 3);
-        if (l3Target) {
-          return {
-            newParentId: l3Target.parent_id,
-            insertAfterNodeId: l3Target.id,
-          };
-        }
-
-        const l2Container = targetNode.level < 2
-          ? findDescendantsAtLevel(targetNode.id, 2).at(-1) ?? null
-          : findClosestAncestorAtLevel(targetNode, 2);
-        if (l2Container) {
-          const lastChild = findLastChildAtLevel(l2Container.id, 3);
-          return {
-            newParentId: l2Container.id,
-            insertAfterNodeId: lastChild?.id ?? null,
-          };
-        }
-      }
-
-      return null;
-    },
-    [findClosestAncestorAtLevel, findDescendantsAtLevel, findLastChildAtLevel]
-  );
-
-  const performDrop = useCallback(
-    (draggedNodeId: string, targetNodeId: string, selectedLevel: 0 | 1 | 2 | 3, clientY?: number) => {
-      const draggedNode = capabilities.find((c) => c.id === draggedNodeId);
-      const targetNode = capabilities.find((c) => c.id === targetNodeId);
-
-      if (!draggedNode || !targetNode) {
-        return;
-      }
-
-      const placement = resolveDropPlacement(targetNode, selectedLevel);
-
-      if (!placement) {
-        setDragMessage(`❌ Cannot place this capability as L${selectedLevel} on the selected target`);
-        setTimeout(() => setDragMessage(null), 3000);
-        return;
-      }
-
-      // Skip if nothing actually changed (e.g. click without drag)
-      if (
-        draggedNode.parent_id === placement.newParentId &&
-        draggedNode.level === selectedLevel
-      ) {
-        return;
-      }
-
-      // Find the nearest sibling above the drop Y for precise insertion position.
-      // Falls back to placement.insertAfterNodeId (end of list) when Y is unavailable.
-      let insertAfterNodeId = placement.insertAfterNodeId;
-      if (clientY != null && placement.newParentId && typeof document !== "undefined") {
-        const siblings = capabilities
-          .filter((c) => c.parent_id === placement.newParentId && c.id !== draggedNodeId)
-          .sort((a, b) => a.sort_order - b.sort_order);
-
-        let bestId: string | null = null;
-        let bestMidY = -Infinity;
-
-        for (const sib of siblings) {
-          const el = document.querySelector(`[data-capability-node-id="${sib.id}"]`);
-          if (!el) continue;
-          const rect = el.getBoundingClientRect();
-          const midY = (rect.top + rect.bottom) / 2;
-          if (midY <= clientY && midY > bestMidY) {
-            bestMidY = midY;
-            bestId = sib.id;
-          }
-        }
-
-        insertAfterNodeId = bestId as string | null; // null = insert at beginning of the list
-      }
-
-      const result = handleNodeDragDrop(
-        draggedNodeId,
-        placement.newParentId,
-        insertAfterNodeId,
-        capabilities
-      );
-
-      if (result.message.includes("Cannot")) {
-        setDragMessage("❌ " + result.message);
-        setTimeout(() => setDragMessage(null), 3000);
-      } else if (result.message.includes("Moved")) {
-        setCapabilities(result.updatedCapabilities);
-        useCatalogStore.setState({
-          capabilities: result.updatedCapabilities,
-          isDirty: true,
-        });
-
-        // Keep the moved node selected so the user can see where it landed (orange ring)
-        setSelectedNodeId(draggedNodeId);
-        setDragMessage("✅ " + result.message);
-        setTimeout(() => setDragMessage(null), 3000);
-      }
-    },
-    [capabilities, resolveDropPlacement]
-  );
-
-
-
-  // Use bounding rect to find the most specific (smallest-area) container under the pointer.
-  // When only the large L1 zone is hit, fall back to nearest L2 panel by X alignment.
-  const getDropTargetFromPoint = useCallback((
-    draggedId: string,
-    clientX: number,
-    clientY: number,
-    draggedLevel?: number,
-  ) => {
-    if (typeof document === "undefined") return null;
-
-    type Hit = { targetId: string; presetLevel: 1 | 2 | 3; containerNodeId: string; area: number };
-    const containers = Array.from(document.querySelectorAll<HTMLElement>("[data-drop-container-node-id]"));
-    let best: Hit | null = null;
-
-    for (const el of containers) {
-      const rect = el.getBoundingClientRect();
-      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) continue;
-
-      const containerNodeId = el.dataset.dropContainerNodeId!;
-      const targetId = el.dataset.dropTargetId!;
-      const rawLevel = el.dataset.dropTargetLevel!;
-      if (!containerNodeId || !targetId || !rawLevel || targetId === draggedId) continue;
-
-      const area = rect.width * rect.height;
-      if (!best || area < best.area) {
-        best = { targetId, presetLevel: Number(rawLevel) as 1 | 2 | 3, containerNodeId, area };
-      }
-    }
-
-    // If only the large L1 zone was hit (drop in a gap between L2 panels or at top/bottom
-    // of a column), find the nearest L2 panel by X alignment + Y proximity.
-    if (best?.presetLevel === 1 && draggedLevel != null && draggedLevel >= 2) {
-      let fallback: Hit | null = null;
-      let closestDist = Infinity;
-
-      for (const el of containers) {
-        if (Number(el.dataset.dropTargetLevel) !== 2) continue;
-        const rect = el.getBoundingClientRect();
-        // Must be in the same horizontal sub-column
-        if (clientX < rect.left || clientX > rect.right) continue;
-        const targetId = el.dataset.dropTargetId!;
-        if (!targetId || targetId === draggedId) continue;
-
-        const centerY = (rect.top + rect.bottom) / 2;
-        const dist = Math.abs(clientY - centerY);
-        if (dist < closestDist) {
-          closestDist = dist;
-          fallback = {
-            targetId,
-            presetLevel: 2,
-            containerNodeId: el.dataset.dropContainerNodeId!,
-            area: rect.width * rect.height,
-          };
-        }
-      }
-
-      if (fallback) best = fallback;
-    }
-
-    return best ? { targetId: best.targetId, presetLevel: best.presetLevel, containerNodeId: best.containerNodeId } : null;
-  }, []);
-
-  const onNodeDragStart: NodeDragHandler = useCallback(
-    (_, node) => {
-      // Auto-select the node being dragged — no separate click needed
-      setSelectedNodeId(node.id);
-      setDraggingNodeId(node.id);
-    },
-    []
-  );
-
-  const onNodeDrag: NodeDragHandler = useCallback(
-    (event, node) => {
-      const lvl = (node.data as CapabilityNodeData).level;
-      const result = getDropTargetFromPoint(node.id, event.clientX, event.clientY, lvl);
-      setHoveredContainerNodeId(result?.containerNodeId ?? null);
-    },
-    [getDropTargetFromPoint]
-  );
-
   const rebuildInteractiveNodes = useCallback(() => {
     if (capabilities.length === 0) {
       setNodes([]);
@@ -461,47 +143,145 @@ function DashboardContent() {
 
     const nextNodes = buildCanvasNodes(capabilities, visibleLevels).map((node) => ({
       ...node,
-      draggable: node.type === "capability",
-      // Give container nodes a CSS class so globals.css can strip RF's white wrapper
-      className: node.type === "dropContainer" ? "drop-container-node" : undefined,
-      // Containers keep their level-specific z-index: L1=-2, L2=-1, L3=0 → nested back-to-front.
-      // Capability nodes always render above all containers.
-      zIndex: node.type === "capability" ? 2 : (node.zIndex ?? 0),
-      // Keep the selected node highlighted (orange ring) even after a drop
-      selected: node.type === "capability" && node.id === selectedNodeId,
-      data: {
-        ...node.data,
-        ...(node.type === "capability"
-          ? {
-              canDrag: true,
-              isDragging: node.id === draggingNodeId,
-              isDropTarget: false,
-            }
-          : {
-              isActive: node.id === hoveredContainerNodeId,
-            }),
-      },
+      draggable: node.data.level >= 1,
+      selected: node.id === selectedNodeId,
+      // L0 behind everything, L1 as container behind L2/L3
+      zIndex: node.data.level === 0 ? -1 : node.data.level === 1 ? 0 : node.zIndex ?? node.data.level,
     }));
 
     setNodes(nextNodes);
-  }, [capabilities, draggingNodeId, hoveredContainerNodeId, selectedNodeId, visibleLevels]);
+  }, [capabilities, selectedNodeId, visibleLevels]);
 
-  const onNodeDragStop: NodeDragHandler = useCallback(
-    (event, node) => {
-      const draggedCap = capabilities.find((c) => c.id === node.id);
-      const result = getDropTargetFromPoint(node.id, event.clientX, event.clientY, draggedCap?.level);
+  const onNodeDragStart: NodeDragHandler = useCallback((_, node) => {
+    setSelectedNodeId(node.id);
+  }, []);
 
-      setDraggingNodeId(null);
-      setHoveredContainerNodeId(null);
+  const onNodeDrag: NodeDragHandler = useCallback(
+    (_, node) => {
+      const dragLevel = (node.data as CapabilityNodeData).level;
+      const intersecting = getIntersectingNodes(node);
 
-      if (result?.presetLevel != null && result.targetId) {
-        const levelToUse = (draggedCap?.level ?? result.presetLevel) as 0 | 1 | 2 | 3;
-        performDrop(node.id, result.targetId, levelToUse, event.clientY);
+      // Find best target: same level first, then parent level
+      let target = intersecting.find(
+        (n) => n.id !== node.id && (n.data as CapabilityNodeData).level === dragLevel
+      );
+      let mode: "after" | "into" = "after";
+
+      if (!target && dragLevel > 0) {
+        target = intersecting.find(
+          (n) => n.id !== node.id && (n.data as CapabilityNodeData).level === dragLevel - 1
+        );
+        if (target) mode = "into";
+      }
+
+      if (target) {
+        const targetNode = getNode(target.id);
+        if (targetNode) {
+          const tData = targetNode.data as CapabilityNodeData;
+          const tW = tData.colWidth ?? tData.nodeWidth ?? 200;
+          const tH = tData.nodeHeight ?? 36;
+
+          if (mode === "after") {
+            // Compare dragged node center Y vs target center Y to decide above/below
+            const dragCenterY = node.position.y + ((node.data as CapabilityNodeData).nodeHeight ?? 36) / 2;
+            const targetCenterY = targetNode.position.y + tH / 2;
+            const isAbove = dragCenterY < targetCenterY;
+
+            // Find the correct insertAfterId
+            const targetCap = capabilities.find((c) => c.id === target!.id);
+            let insertAfterId: string | null;
+            let indicatorY: number;
+
+            if (isAbove) {
+              // Insert before target: find previous sibling
+              if (targetCap) {
+                const siblings = capabilities
+                  .filter((c) => c.parent_id === targetCap.parent_id && c.level === targetCap.level && c.id !== node.id)
+                  .sort((a, b) => a.sort_order - b.sort_order);
+                const targetIdx = siblings.findIndex((s) => s.id === target!.id);
+                insertAfterId = targetIdx > 0 ? siblings[targetIdx - 1].id : null;
+              } else {
+                insertAfterId = null;
+              }
+              indicatorY = targetNode.position.y; // line at top of target
+            } else {
+              // Insert after target
+              insertAfterId = target!.id;
+              indicatorY = targetNode.position.y + tH; // line at bottom of target
+            }
+
+            setDropIndicator({
+              x: targetNode.position.x,
+              y: indicatorY,
+              width: tW,
+              targetId: target.id,
+              mode,
+              insertAfterId,
+              newParentId: targetCap?.parent_id ?? null,
+            });
+          } else {
+            // "into" mode: highlight the container
+            setDropIndicator({
+              x: targetNode.position.x,
+              y: targetNode.position.y,
+              width: tW,
+              targetId: target.id,
+              mode,
+              insertAfterId: null,
+              newParentId: target.id,
+            });
+          }
+        }
       } else {
-        rebuildInteractiveNodes();
+        setDropIndicator(null);
       }
     },
-    [capabilities, getDropTargetFromPoint, performDrop, rebuildInteractiveNodes]
+    [getIntersectingNodes, getNode, capabilities]
+  );
+
+  const onNodeDragStop: NodeDragHandler = useCallback(
+    (_, node) => {
+      const draggedCap = capabilities.find((c) => c.id === node.id);
+      if (!draggedCap) {
+        setDropIndicator(null);
+        rebuildInteractiveNodes();
+        return;
+      }
+
+      // Use the pre-computed drop indicator for exact placement
+      if (!dropIndicator) {
+        rebuildInteractiveNodes();
+        return;
+      }
+
+      const newParentId = dropIndicator.newParentId;
+      const insertAfterId = dropIndicator.insertAfterId;
+
+      const result = handleNodeDragDrop(
+        node.id,
+        newParentId,
+        insertAfterId,
+        capabilities
+      );
+
+      if (result.message.includes("Cannot") || result.message.includes("not found")) {
+        setDragMessage("❌ " + result.message);
+        setTimeout(() => setDragMessage(null), 3000);
+        rebuildInteractiveNodes();
+      } else {
+        setCapabilities(result.updatedCapabilities);
+        useCatalogStore.setState({
+          capabilities: result.updatedCapabilities,
+          isDirty: true,
+        });
+        setSelectedNodeId(node.id);
+        setDragMessage("✅ " + result.message);
+        setTimeout(() => setDragMessage(null), 3000);
+      }
+
+      setDropIndicator(null);
+    },
+    [capabilities, dropIndicator, rebuildInteractiveNodes]
   );
 
   const onUpdateNode = useCallback(
@@ -662,6 +442,58 @@ function DashboardContent() {
             proOptions={{ hideAttribution: true }}
           >
             <Background gap={20} size={1} color="#e2e8f0" />
+
+            {/* Drop indicator */}
+            {dropIndicator && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: 0,
+                  pointerEvents: "none",
+                  zIndex: 9999,
+                  transform: `translate(${dropIndicator.x}px, ${dropIndicator.y}px)`,
+                }}
+              >
+                {dropIndicator.mode === "after" ? (
+                  // Horizontal insertion line
+                  <div
+                    style={{
+                      width: `${dropIndicator.width}px`,
+                      height: "3px",
+                      background: "#f59e0b",
+                      borderRadius: "2px",
+                      boxShadow: "0 0 8px 2px rgba(245, 158, 11, 0.5)",
+                      position: "relative",
+                    }}
+                  >
+                    {/* Circle indicators at ends */}
+                    <div style={{
+                      position: "absolute", left: "-4px", top: "-3px",
+                      width: "9px", height: "9px", borderRadius: "50%",
+                      background: "#f59e0b", border: "2px solid #fff",
+                    }} />
+                    <div style={{
+                      position: "absolute", right: "-4px", top: "-3px",
+                      width: "9px", height: "9px", borderRadius: "50%",
+                      background: "#f59e0b", border: "2px solid #fff",
+                    }} />
+                  </div>
+                ) : (
+                  // "Into" container highlight
+                  <div
+                    style={{
+                      width: `${dropIndicator.width}px`,
+                      height: "40px",
+                      border: "2px dashed #f59e0b",
+                      borderRadius: "6px",
+                      background: "rgba(245, 158, 11, 0.08)",
+                      boxShadow: "0 0 10px 2px rgba(245, 158, 11, 0.3)",
+                    }}
+                  />
+                )}
+              </div>
+            )}
           </ReactFlow>
           {dragMessage && (
             <div className="absolute bottom-4 left-4 rounded-lg bg-blue-600 px-3 py-2 text-xs text-white shadow-lg">

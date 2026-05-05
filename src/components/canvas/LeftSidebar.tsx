@@ -2,7 +2,7 @@
 
 const LAYERS = [
   { level: 0, label: "L0 — Domain", color: "#0f1b2d" },
-  { level: 1, label: "L1 — Group", color: "#1545d8" },
+  { level: 1, label: "L1 — Group", color: "#2563eb" },
   { level: 2, label: "L2 — Subgroup", color: "#599dff" },
   { level: 3, label: "L3 — Leaf", color: "#d1e3ff" },
 ];

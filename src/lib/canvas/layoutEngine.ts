@@ -1,61 +1,52 @@
 import type { Node } from "reactflow";
 import type { Capability } from "@/types/capability";
 import type { CapabilityNodeData } from "@/components/canvas/CapabilityNode";
-import type { DropContainerNodeData } from "@/components/canvas/DropContainerNode";
 
 /**
- * Visual Placemat layout:
+ * LeanIX-style visual capability map layout:
  *
- * ┌──────────────────────────────────────────────┐
- * │       1  Strategic Portfolio Management       │
- * │ ┌──────────┐┌──────────┐┌──────────┐┌───┐ │
- * │ │ 1.1      ││ 1.2      ││ 1.3      ││... │ │
- * │ │ Demand   ││ Project  ││ Resource ││    │ │
- * │ │┌────────┐││┌────────┐││┌────────┐││    │ │
- * │ ││1.1.1    ││││1.2.1    ││││1.3.1    │││    │ │
- * │ ││Idea Coll││││Proj Cre ││││Res Plan │││    │ │
- * │ │├────────┤││├────────┤││├────────┤││    │ │
- * │ ││1.1.2    ││││1.2.2    ││││1.3.2    │││    │ │
- * │ │└────────┘││└────────┘││└────────┘││    │ │
- * │ └──────────┘└──────────┘└──────────┘└───┘ │
- * └──────────────────────────────────────────────┘
+ * ┌──────── L0: Strategic Management ─────────────────────────┐  ┌──── L0: Customer ──────────┐
+ * │ ┌─ L1 ──────┐ ┌─ L1 ──────┐ ┌─ L1 ──────────┐           │  │ ┌─ L1 ──────┐ ┌─ L1 ────┐ │
+ * │ │ Strategy   │ │ Org Dev   │ │ Governance     │           │  │ │ CRM       │ │ Sales   │ │
+ * │ │ Developmt  │ │           │ │                │           │  │ │           │ │         │ │
+ * │ │  L2: Plan  │ │  L2: HR   │ │  L2: Comply    │           │  │ │  L2: Acq  │ │  L2: Pl │ │
+ * │ │   · Item1  │ │   · Item1 │ │   · Item1      │           │  │ │   · Item1 │ │   · I1  │ │
+ * │ │   · Item2  │ │   · Item2 │ │   · Item2      │           │  │ │   · Item2 │ │         │ │
+ * │ └────────────┘ └───────────┘ └────────────────┘           │  │ └───────────┘ └─────────┘ │
+ * └───────────────────────────────────────────────────────────┘  └─────────────────────────────┘
+ *
+ * L0 = horizontal spanning header (colored band)
+ * L1 = vertical columns side-by-side under their L0 parent
+ * L2 = bold section headers inside L1 columns
+ * L3 = bullet items under L2 headers
  */
 
-// ---- Sizing constants ----
-export const SUB_COL_W = 145; // L1 sub-column width
-const CONTAINER_PAD = 20;   // visible padding on each side of content inside L2/L3 containers (10px per side)
-const L1_EXTRA = 10;        // extra inset the L1 gray container adds beyond L2 containers on all 4 sides
-const L1_COL_GAP = 16;     // visible gap between adjacent L1 containers
-// SUB_COL_GAP = CONTAINER_PAD + 2*L1_EXTRA + L1_COL_GAP so adjacent L1 container edges are L1_COL_GAP apart
-const SUB_COL_GAP = CONTAINER_PAD + 2 * L1_EXTRA + L1_COL_GAP; // = 56
-const L0_H = 42;        // L0 header height (always single line)
-const V_GAP = 6;        // gap between L1/L2 nodes
-const L3_V_GAP = 2;    // tighter gap between L3 nodes inside the L2 container
-// L2_GAP must equal CONTAINER_PAD so consecutive L2 container edges touch exactly (zero gap)
-const L2_GAP = CONTAINER_PAD; // = 20 → L2 panels touch with no visible gap
-const L0_GAP = 12;      // horizontal gap between L0 groups
-const L0_PAD = 6;       // internal padding of L0 header
-const MIN_CONTAINER_H = 32;
+// ---- Layout constants ----
+export const L1_COL_W   = 260;   // width of each L1 column
+export const SUB_COL_W  = L1_COL_W; // backward compat alias
+const L1_COL_GAP  = 16;   // gap between L1 columns
+const L0_BAND_H   = 50;   // L0 horizontal header height
+const L0_GROUP_GAP = 32;  // gap between L0 groups horizontally
+const L1_TOP_GAP  = 8;    // gap between L0 band bottom and L1 columns top
+const L1_HDR_H    = 40;   // L1 colored header height
+const L1_PAD      = 10;   // padding inside L1 around L2/L3 nodes
+const ROW_H       = 36;   // height per L2/L3 row
+const ROW_GAP     = 3;    // gap between rows
+const L2_GROUP_GAP = 12;  // extra gap between L2 groups inside L1
 
-// Estimate rendered height from label text.
-// SUB_COL_W=145, padding=8px each side → usable=129px.
-// At 10px font, ~1 char ≈ 5.8px → ~22 chars/line for L1/L2.
-// L3 nodes are narrower (SUB_COL_W - 2*L3_INSET = 121px) → ~20 chars/line at 9.5px font.
-function nodeH(level: number, label = ""): number {
-  if (level === 0) return L0_H;
-  const charsPerLine = level === 3 ? 20 : 22;
-  const words = label.split(" ");
-  let lines = 1;
-  let lineLen = 0;
-  for (const w of words) {
-    if (lineLen > 0 && lineLen + 1 + w.length > charsPerLine) { lines++; lineLen = w.length; }
-    else { lineLen += (lineLen > 0 ? 1 : 0) + w.length; }
-  }
-  const fontSize = level === 3 ? 9.5 : 10;
-  const numH = 10; // number badge
-  const padV = 8;  // top + bottom padding in node (generous to match screenshot)
-  return Math.ceil(numH + lines * fontSize * 1.25 + padV);
-}
+// Per-L0 column colors
+const L0_COLORS = [
+  { bg: "#c0392b", text: "#fff" }, // red
+  { bg: "#e67e22", text: "#fff" }, // orange
+  { bg: "#8e44ad", text: "#fff" }, // purple
+  { bg: "#27ae60", text: "#fff" }, // green
+  { bg: "#2980b9", text: "#fff" }, // blue
+  { bg: "#16a085", text: "#fff" }, // teal
+  { bg: "#d35400", text: "#fff" }, // dark orange
+  { bg: "#2c3e50", text: "#fff" }, // dark navy
+  { bg: "#7f8c8d", text: "#fff" }, // grey
+  { bg: "#f39c12", text: "#fff" }, // yellow
+];
 
 interface TreeNode {
   cap: Capability;
@@ -63,10 +54,28 @@ interface TreeNode {
   number: string;
 }
 
+/**
+ * Measure the height an L1 column needs based on its L2/L3 children.
+ * Each L2 and L3 is a separate row.
+ */
+function measureL1Height(l1: TreeNode, visibleLevels: Set<number>): number {
+  let h = L1_HDR_H + L1_PAD; // header + top padding
+  const l2Children = l1.children.filter((c) => visibleLevels.has(c.cap.level));
+  for (let i = 0; i < l2Children.length; i++) {
+    if (i > 0) h += L2_GROUP_GAP; // gap between L2 groups
+    h += ROW_H + ROW_GAP;
+    const l3Children = l2Children[i].children.filter((c) => visibleLevels.has(c.cap.level));
+    h += l3Children.length * (ROW_H + ROW_GAP);
+  }
+  h += L1_PAD; // bottom padding
+  if (l2Children.length === 0) h += 8;
+  return Math.max(h, 70);
+}
+
 export function buildCanvasNodes(
   capabilities: Capability[],
   visibleLevels: Set<number>
-): Node<CapabilityNodeData | DropContainerNodeData>[] {
+): Node<CapabilityNodeData>[] {
   if (!capabilities.length) return [];
 
   const byId = new Map<string, Capability>();
@@ -104,193 +113,123 @@ export function buildCanvasNodes(
     assign(root);
   });
 
-  // Pre-compute ONE uniform height per level across the entire diagram.
-  // Every L1 node gets the same height, every L2 the same, every L3 the same —
-  // driven by whichever label is longest at each level.
-  const globalMaxH: Record<number, number> = { 1: 0, 2: 0, 3: 0 };
-  for (const cap of sorted) {
-    if (cap.level === 0 || cap.level > 3) continue;
-    const h = nodeH(cap.level, cap.name);
-    if (h > globalMaxH[cap.level]) globalMaxH[cap.level] = h;
-  }
-  const capH = (cap: Capability): number =>
-    cap.level === 0 ? L0_H : (globalMaxH[cap.level] ?? nodeH(cap.level, cap.name));
+  const nodes: Node<CapabilityNodeData>[] = [];
+  let groupX = 0;
 
-  const nodes: Node<CapabilityNodeData | DropContainerNodeData>[] = [];
-  let globalX = 0;
-
-  for (const root of roots) {
-    if (!visibleLevels.has(root.cap.level)) continue;
-
+  roots.forEach((root, rootIdx) => {
+    const color = L0_COLORS[rootIdx % L0_COLORS.length];
     const l1Children = root.children.filter((c) => visibleLevels.has(c.cap.level));
-    const numL1 = Math.max(l1Children.length, 1);
-    const l0Width = numL1 * SUB_COL_W + (numL1 - 1) * SUB_COL_GAP + L0_PAD * 2;
 
-    // --- L0 header ---
-    nodes.push({
-      id: root.cap.id,
-      type: "capability",
-      position: { x: globalX, y: 0 },
-      data: {
-        label: root.cap.name,
-        level: root.cap.level,
-        parentName: null,
-        description: root.cap.description,
-        number: root.number,
-        colWidth: l0Width,
-      },
-    });
+    // Number of L1 columns in this group
+    const numL1 = l1Children.length;
+    const groupW = numL1 > 0
+      ? numL1 * L1_COL_W + (numL1 - 1) * L1_COL_GAP
+      : L1_COL_W;
 
-    // --- L1 sub-columns side by side ---
-    let subX = globalX + L0_PAD;
+    // Measure L1 heights
+    const l1Heights = l1Children.map((l1) => measureL1Height(l1, visibleLevels));
+    const maxL1H = l1Heights.length > 0 ? Math.max(...l1Heights) : 0;
 
-    for (const l1 of l1Children) {
-      let cursorY = L0_H + V_GAP;
+    // ── L0: horizontal spanning header ──
+    if (visibleLevels.has(0)) {
+      nodes.push({
+        id: root.cap.id,
+        type: "capability",
+        position: { x: groupX, y: 0 },
+        data: {
+          label: root.cap.name,
+          level: 0,
+          parentName: null,
+          description: root.cap.description,
+          number: root.number,
+          colWidth: groupW,
+          nodeHeight: L0_BAND_H,
+          l0Color: color.bg,
+          l0TextColor: color.text,
+        },
+      });
+    }
 
-      // L1 capability node
+    // ── L1: vertical columns side-by-side ──
+    const l1Y = visibleLevels.has(0) ? L0_BAND_H + L1_TOP_GAP : 0;
+
+    l1Children.forEach((l1, l1Idx) => {
+      const l1X = groupX + l1Idx * (L1_COL_W + L1_COL_GAP);
+      const l1H = l1Heights[l1Idx];
       const l1Parent = l1.cap.parent_id ? byId.get(l1.cap.parent_id) : null;
+
+      // L1 node — header + container background
       nodes.push({
         id: l1.cap.id,
         type: "capability",
-        position: { x: subX, y: cursorY },
+        position: { x: l1X, y: l1Y },
         data: {
           label: l1.cap.name,
-          level: l1.cap.level,
+          level: 1,
           parentName: l1Parent?.name ?? null,
           description: l1.cap.description,
           number: l1.number,
-          nodeHeight: capH(l1.cap),
+          nodeWidth: L1_COL_W,
+          nodeHeight: l1H,
+          l0Color: color.bg,
         },
       });
-      cursorY += capH(l1.cap) + V_GAP;
 
-      // Track where the L2 panel area starts (for the per-L1 gray container)
-      const l1ColStartY = cursorY;
-
+      // L2 and L3 as separate nodes inset inside the L1 column
+      let cursorY = l1Y + L1_HDR_H + L1_PAD;
       const l2Children = l1.children.filter((c) => visibleLevels.has(c.cap.level));
+      const innerW = L1_COL_W - 2 * L1_PAD;
 
-      // If no L2 children, show a minimal placeholder drop zone for the L1 sub-column
-      if (l2Children.length === 0) {
-        nodes.push({
-          id: `drop-l2-empty-${l1.cap.id}`,
-          type: "dropContainer",
-          position: { x: subX - CONTAINER_PAD / 2, y: cursorY - CONTAINER_PAD / 2 },
-          draggable: false,
-          selectable: false,
-          connectable: false,
-          zIndex: -1,
-          data: {
-            label: "Drop as L2",
-            dropLevel: 2,
-            targetNodeId: l1.cap.id,
-            width: SUB_COL_W + CONTAINER_PAD,
-            height: MIN_CONTAINER_H,
-          },
-        });
-        cursorY += MIN_CONTAINER_H;
-      }
-
-      // One container per L2 node — L2 capability node sits ABOVE its container
-      // (mirrors how L1 node sits above the L1 container), container wraps only L3 children.
-      for (let li = 0; li < l2Children.length; li++) {
-        const l2 = l2Children[li];
-
-        // Gap between bottom of previous L2 container and top of this L2 node
-        if (li > 0) cursorY += L2_GAP;
-
-        // L2 capability node — sits ABOVE its light-blue container (not inside it)
+      for (let l2i = 0; l2i < l2Children.length; l2i++) {
+        const l2 = l2Children[l2i];
+        if (l2i > 0) cursorY += L2_GROUP_GAP; // gap between L2 groups
         const l2Parent = l2.cap.parent_id ? byId.get(l2.cap.parent_id) : null;
+
         nodes.push({
           id: l2.cap.id,
           type: "capability",
-          position: { x: subX, y: cursorY },
+          position: { x: l1X + L1_PAD, y: cursorY },
+          zIndex: 2,
           data: {
             label: l2.cap.name,
             level: 2,
             parentName: l2Parent?.name ?? null,
             description: l2.cap.description,
             number: l2.number,
-            nodeHeight: capH(l2.cap),
+            nodeWidth: innerW,
+            nodeHeight: ROW_H,
+            l0Color: color.bg,
           },
         });
-        cursorY += capH(l2.cap) + V_GAP;
+        cursorY += ROW_H + ROW_GAP;
 
-        // L2 container + L3 nodes — only rendered when L3 level is visible
         const l3Children = l2.children.filter((c) => visibleLevels.has(c.cap.level));
-        if (l3Children.length > 0) {
-          // Container starts here, after the L2 node
-          const l2ContainerTop = cursorY;
+        for (const l3 of l3Children) {
+          const l3Parent = l3.cap.parent_id ? byId.get(l3.cap.parent_id) : null;
 
-          for (const l3 of l3Children) {
-            const l3Parent = l3.cap.parent_id ? byId.get(l3.cap.parent_id) : null;
-            nodes.push({
-              id: l3.cap.id,
-              type: "capability",
-              position: { x: subX, y: cursorY },
-              data: {
-                label: l3.cap.name,
-                level: 3,
-                parentName: l3Parent?.name ?? null,
-                description: l3.cap.description,
-                number: l3.number,
-                nodeHeight: capH(l3.cap),
-              },
-            });
-            cursorY += capH(l3.cap) + L3_V_GAP;
-          }
-
-          // L2 light-blue container — only when there are visible L3 nodes
-          const l2ContainerH = cursorY - l2ContainerTop;
           nodes.push({
-            id: `drop-l2-${l2.cap.id}`,
-            type: "dropContainer",
-            position: { x: subX - CONTAINER_PAD / 2, y: l2ContainerTop - CONTAINER_PAD / 2 },
-            draggable: false,
-            selectable: false,
-            connectable: false,
-            zIndex: -1,
+            id: l3.cap.id,
+            type: "capability",
+            position: { x: l1X + L1_PAD, y: cursorY },
+            zIndex: 3,
             data: {
-              label: "Drop as L2",
-              dropLevel: 2,
-              targetNodeId: l2.cap.id,
-              width: SUB_COL_W + CONTAINER_PAD,
-              height: Math.max(l2ContainerH + CONTAINER_PAD, MIN_CONTAINER_H),
+              label: l3.cap.name,
+              level: 3,
+              parentName: l3Parent?.name ?? null,
+              description: l3.cap.description,
+              number: l3.number,
+              nodeWidth: innerW,
+              nodeHeight: ROW_H,
+              l0Color: color.bg,
             },
           });
+          cursorY += ROW_H + ROW_GAP;
         }
       }
+    });
 
-      // Per-L1-sub-column gray container — wraps ALL L2 panels for this L1.
-      // Pushed last so its height is known. Uses dropLevel=1 for gray color;
-      // actual drop level is always taken from the dragged node's own level.
-      // Expanded by L1_EXTRA on all 4 sides beyond the L2 containers so the gray background
-      // is visible as a border around all the dark-blue L2 panels.
-      const l1ColH = cursorY - l1ColStartY;
-      nodes.push({
-        id: `drop-l1col-${l1.cap.id}`,
-        type: "dropContainer",
-        position: {
-          x: subX - CONTAINER_PAD / 2 - L1_EXTRA,
-          y: l1ColStartY - CONTAINER_PAD / 2 - L1_EXTRA,
-        },
-        draggable: false,
-        selectable: false,
-        connectable: false,
-        zIndex: -2, // deepest background layer
-        data: {
-          label: "L1 column",
-          dropLevel: 1,
-          targetNodeId: l1.cap.id,
-          width: SUB_COL_W + CONTAINER_PAD + 2 * L1_EXTRA,
-          height: Math.max(l1ColH + CONTAINER_PAD + 2 * L1_EXTRA, MIN_CONTAINER_H),
-        },
-      });
-
-      subX += SUB_COL_W + SUB_COL_GAP;
-    }
-
-    globalX += l0Width + L0_GAP;
-  }
+    groupX += groupW + L0_GROUP_GAP;
+  });
 
   return nodes;
 }
