@@ -67,6 +67,7 @@ export async function POST(request: NextRequest) {
           parent_id: string | null;
           name: string;
           description: string | null;
+          note: string | null;
           sort_order: number;
           source: string;
         }) => ({
@@ -75,6 +76,7 @@ export async function POST(request: NextRequest) {
           level,
           name: c.name,
           description: c.description,
+          note: c.note || null,
           sort_order: c.sort_order,
           source: c.source || "xlsx_import",
         })

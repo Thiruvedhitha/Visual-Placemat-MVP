@@ -6,6 +6,22 @@ import type { Capability } from "@/types/capability";
 
 const LEVEL_LABELS = ["L0 domain", "L1 group", "L2 subgroup", "L3 leaf"];
 
+// Default background colors per level (matches CapabilityNode LEVEL_COLORS)
+const LEVEL_BG_DEFAULTS: Record<number, string> = {
+  0: "#0f1b2d",
+  1: "#2563eb",
+  2: "#599dff",
+  3: "#ffffff",
+};
+
+// Default border colors per level
+const LEVEL_BORDER_DEFAULTS: Record<number, string> = {
+  0: "#0f1b2d",
+  1: "#2563eb",
+  2: "#599dff",
+  3: "#d1e3ff",
+};
+
 interface RightSidebarProps {
   node: { id: string; data: CapabilityNodeData } | null;
   capabilities: Capability[];
@@ -218,6 +234,29 @@ export default function RightSidebar({
   onDeleteChild,
   onDeleteNode,
 }: RightSidebarProps) {
+  // Track initial editable values when a node is first selected
+  const [initialData, setInitialData] = useState<{
+    fill?: string;
+    border?: string;
+    note?: string;
+    description?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (node) {
+      setInitialData({
+        fill: node.data.fill,
+        border: node.data.border,
+        note: node.data.note,
+        description: node.data.description,
+      });
+    } else {
+      setInitialData(null);
+    }
+    // Only capture on node selection change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [node?.id]);
+
   if (!node) {
     return (
       <aside className="flex w-64 flex-shrink-0 flex-col border-l border-slate-200 bg-white p-5">
@@ -228,6 +267,16 @@ export default function RightSidebar({
   }
 
   const { data } = node;
+
+  const handleReset = () => {
+    if (!initialData) return;
+    onUpdateNode?.(node.id, {
+      fill: initialData.fill,
+      border: initialData.border,
+      note: initialData.note,
+      description: initialData.description,
+    });
+  };
 
   // Raw Capability for the selected node (gives us parent_id)
   const cap = capabilities.find((c) => c.id === node.id);
@@ -257,29 +306,40 @@ export default function RightSidebar({
 
   return (
     <aside className="flex w-64 flex-shrink-0 flex-col overflow-y-auto border-l border-slate-200 bg-white p-5">
-      {/* ── Header with delete button ── */}
+      {/* ── Header with reset & delete buttons ── */}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-slate-800">Node properties</h3>
-        <button
-          onClick={() => {
-            if (window.confirm(`Delete "${data.label}" and all its children?`)) {
-              onDeleteNode?.(node.id);
-            }
-          }}
-          title={`Delete "${data.label}" permanently`}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-red-50 hover:text-red-500"
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleReset}
+            title="Reset changes"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-amber-50 hover:text-amber-600"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+            </svg>
+          </button>
+          <button
+            onClick={() => {
+              if (window.confirm(`Delete "${data.label}" and all its children?`)) {
+                onDeleteNode?.(node.id);
+              }
+            }}
+            title={`Delete "${data.label}" permanently`}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-red-50 hover:text-red-500"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div className="mt-4 space-y-4 text-sm">
         {/* ── Selected name ── */}
         <div>
-          <span className="text-slate-400">Selected: </span>
-          <span className="font-medium text-slate-800">{data.label}</span>
+          <span className="block text-xs text-slate-400">Selected</span>
+          <span className="mt-0.5 block break-words font-medium text-slate-800">{data.label}</span>
         </div>
 
         {/* ── Level badge ── */}
@@ -292,10 +352,10 @@ export default function RightSidebar({
 
         {/* ── Grandparent (read-only) ── */}
         {data.level >= 2 && (
-          <div className="flex items-center justify-between">
-            <span className="text-slate-400">Grandparent</span>
+          <div>
+            <span className="block text-xs text-slate-400">Grandparent</span>
             <span
-              className="max-w-[130px] truncate text-right text-xs text-slate-600"
+              className="mt-0.5 block break-words text-xs text-slate-600"
               title={grandparentCap?.name}
             >
               {grandparentCap?.name ?? "—"}
@@ -329,13 +389,13 @@ export default function RightSidebar({
         {/* ── Divider ── */}
         <hr className="border-slate-100" />
 
-        {/* ── Fill color ── */}
+        {/* ── Fill color (container/background) ── */}
         <div className="flex items-center justify-between">
-          <span className="text-slate-400">Fill</span>
+          <span className="text-slate-400">Background</span>
           <input
             type="color"
             className="h-6 w-8 cursor-pointer rounded border border-slate-200 p-0"
-            value={data.fill || "#ffffff"}
+            value={data.fill || LEVEL_BG_DEFAULTS[data.level]}
             onChange={(e) => onUpdateNode?.(node.id, { fill: e.target.value })}
           />
         </div>
@@ -346,7 +406,7 @@ export default function RightSidebar({
           <input
             type="color"
             className="h-6 w-8 cursor-pointer rounded border border-slate-200 p-0"
-            value={data.border || "#599dff"}
+            value={data.border || LEVEL_BORDER_DEFAULTS[data.level]}
             onChange={(e) => onUpdateNode?.(node.id, { border: e.target.value })}
           />
         </div>
@@ -364,12 +424,16 @@ export default function RightSidebar({
         </div>
 
         {/* ── Description ── */}
-        {data.description && (
-          <div>
-            <span className="block text-slate-400">Description</span>
-            <p className="mt-0.5 text-xs text-slate-600">{data.description}</p>
-          </div>
-        )}
+        <div>
+          <span className="block text-slate-400">Description</span>
+          <textarea
+            className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-200"
+            rows={3}
+            placeholder="Add a description…"
+            value={data.description || ""}
+            onChange={(e) => onUpdateNode?.(node.id, { description: e.target.value })}
+          />
+        </div>
 
         {/* ── Children multiselect (L1 → L2, L2 → L3) ── */}
         {childLevel !== null && (
