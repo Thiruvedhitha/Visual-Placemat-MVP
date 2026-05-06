@@ -22,6 +22,8 @@ import RightSidebar from "@/components/canvas/RightSidebar";
 import CanvasToolbar from "@/components/canvas/CanvasToolbar";
 import { buildCanvasNodes } from "@/lib/canvas/layoutEngine";
 import { handleNodeDragDrop } from "@/lib/canvas/dragDropHandler";
+import { executeCommands } from "@/lib/commands/executor";
+import type { DiagramCommand, NodeStylePatch } from "@/lib/commands/index";
 import type { Capability } from "@/types/capability";
 import { useCatalogStore } from "@/stores/catalogStore";
 
@@ -70,7 +72,7 @@ function DashboardContent() {
   );
   const [interactionMode, setInteractionMode] = useState<"select" | "pan">("select");
   const [dragMessage, setDragMessage] = useState<string | null>(null);
-  const [nodeStyles, setNodeStyles] = useState<Record<string, { fill?: string; border?: string }>>({});
+  const [nodeStyles, setNodeStyles] = useState<Record<string, NodeStylePatch>>({});
   const [dropIndicator, setDropIndicator] = useState<{ x: number; y: number; width: number; targetId: string; mode: "after" | "into"; insertAfterId: string | null; newParentId: string | null } | null>(null);
   const dropIndicatorRef = useRef(dropIndicator);
   dropIndicatorRef.current = dropIndicator;
@@ -578,6 +580,22 @@ function DashboardContent() {
     []
   );
 
+  /** Apply AI-generated commands: runs locally, marks dirty, no DB write */
+  const applyAICommands = useCallback(
+    (commands: DiagramCommand[]) => {
+      setCapabilities((prevCaps) => {
+        setNodeStyles((prevStyles: Record<string, NodeStylePatch>) => {
+          const result = executeCommands(commands, prevCaps, prevStyles);
+          useCatalogStore.setState({ capabilities: result.capabilities, isDirty: true });
+          setTimeout(() => setNodeStyles(result.nodePatches), 0);
+          return prevStyles;
+        });
+        return prevCaps;
+      });
+    },
+    []
+  );
+
   // Rebuild nodes when capabilities or visible levels change
   useEffect(() => {
     rebuildInteractiveNodes();
@@ -805,11 +823,13 @@ function DashboardContent() {
                   : null
               }
               capabilities={capabilities}
+              nodeStyles={nodeStyles}
               onUpdateNode={onUpdateNode}
               onReparent={onReparent}
               onDetachChild={onDetachChild}
               onDeleteChild={onDeleteNode}
               onDeleteNode={onDeleteNode}
+              onAICommands={applyAICommands}
             />
           </div>
         )}

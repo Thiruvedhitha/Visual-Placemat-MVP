@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import type { CapabilityNodeData } from "./CapabilityNode";
 import type { Capability } from "@/types/capability";
+import type { DiagramCommand, NodeStylePatch } from "@/lib/commands/index";
 
 const LEVEL_LABELS = ["L0 domain", "L1 group", "L2 subgroup", "L3 leaf"];
 
@@ -22,9 +23,12 @@ const LEVEL_BORDER_DEFAULTS: Record<number, string> = {
   3: "#d1e3ff",
 };
 
+type ChatMessage = { role: "user" | "ai"; text: string };
+
 interface RightSidebarProps {
   node: { id: string; data: CapabilityNodeData } | null;
   capabilities: Capability[];
+  nodeStyles?: Record<string, NodeStylePatch>;
   onUpdateNode?: (id: string, patch: Partial<CapabilityNodeData>) => void;
   /** Move a node to a different parent (hierarchy enforced in handler) */
   onReparent?: (nodeId: string, newParentId: string) => void;
@@ -34,6 +38,8 @@ interface RightSidebarProps {
   onDeleteChild?: (childId: string) => void;
   /** Permanently delete the currently selected node (and all its descendants) */
   onDeleteNode?: (nodeId: string) => void;
+  /** Apply AI-generated diagram commands to local state */
+  onAICommands?: (commands: DiagramCommand[]) => void;
 }
 
 // ── ChildrenPanel ────────────────────────────────────────────────────────────
@@ -228,13 +234,18 @@ function ChildrenPanel({
 export default function RightSidebar({
   node,
   capabilities,
+  nodeStyles = {},
   onUpdateNode,
   onReparent,
   onDetachChild,
   onDeleteChild,
   onDeleteNode,
+  onAICommands,
 }: RightSidebarProps) {
-  // Track initial editable values when a node is first selected
+  // Tab state
+  const [activeTab, setActiveTab] = useState<"properties" | "chat">("properties");
+
+  // Track initial editable values when a node is first selected (for reset)
   const [initialData, setInitialData] = useState<{
     fill?: string;
     border?: string;
@@ -242,6 +253,19 @@ export default function RightSidebar({
     description?: string;
   } | null>(null);
 
+  // AI chat state
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      role: "ai",
+      text: "Hi! I can help you edit, rename, restyle, or restructure this node. What would you like to do?",
+    },
+  ]);
+  const [inputText, setInputText] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
+  const [includeContext, setIncludeContext] = useState(true);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Reset everything when a different node is selected
   useEffect(() => {
     if (node) {
       setInitialData({
@@ -253,13 +277,84 @@ export default function RightSidebar({
     } else {
       setInitialData(null);
     }
-    // Only capture on node selection change
+    setActiveTab("properties");
+    setMessages([
+      {
+        role: "ai",
+        text: "Hi! I can help you edit, rename, restyle, or restructure this node. What would you like to do?",
+      },
+    ]);
+    setInputText("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [node?.id]);
 
+  // Auto-scroll chat messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isTyping]);
+
+  const handleSend = useCallback(async () => {
+    if (!inputText.trim() || isTyping || !node) return;
+
+    const userText = inputText.trim();
+    setInputText("");
+    setMessages((prev) => [...prev, { role: "user", text: userText }]);
+    setIsTyping(true);
+
+    try {
+      let fullPrompt = userText;
+      if (includeContext) {
+        const cap = capabilities.find((c) => c.id === node.id);
+        const parentCap = cap?.parent_id
+          ? capabilities.find((c) => c.id === cap.parent_id)
+          : null;
+        fullPrompt = `[Context: the selected node is "${node.data.label}" (${LEVEL_LABELS[node.data.level]})${
+          parentCap ? `, under "${parentCap.name}"` : ""
+        }]\n\n${userText}`;
+      }
+
+      const res = await fetch("/api/transform", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: fullPrompt,
+          capabilities,
+          nodeStyles,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "ai", text: `Error: ${data.error || "Something went wrong"}` },
+        ]);
+        return;
+      }
+
+      if (Array.isArray(data.commands) && data.commands.length > 0) {
+        onAICommands?.(data.commands);
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        { role: "ai", text: data.summary || "Done!" },
+      ]);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        { role: "ai", text: "Network error. Please try again." },
+      ]);
+    } finally {
+      setIsTyping(false);
+    }
+  }, [inputText, isTyping, node, capabilities, nodeStyles, includeContext, onAICommands]);
+
+  // ── Empty state ──────────────────────────────────────────────────────────────
   if (!node) {
     return (
-      <aside className="flex w-64 flex-shrink-0 flex-col border-l border-slate-200 bg-white p-5">
+      <aside className="flex w-80 flex-shrink-0 flex-col border-l border-slate-200 bg-white p-5">
         <h3 className="text-sm font-semibold text-slate-800">Node properties</h3>
         <p className="mt-4 text-xs text-slate-400">Click a node to inspect</p>
       </aside>
@@ -304,152 +399,299 @@ export default function RightSidebar({
   const childLevel =
     data.level === 1 ? 2 : data.level === 2 ? 3 : null;
 
+  // ── Tab styles ───────────────────────────────────────────────────────────────
+  const tabBase =
+    "flex-1 py-2.5 text-xs font-medium border-b-2 transition-colors duration-150 cursor-pointer";
+  const tabActive = "text-blue-400 border-blue-500";
+  const tabInactive =
+    "text-slate-500 border-transparent hover:text-slate-300 hover:border-slate-600";
+
   return (
-    <aside className="flex w-64 flex-shrink-0 flex-col overflow-y-auto border-l border-slate-200 bg-white p-5">
-      {/* ── Header with reset & delete buttons ── */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-800">Node properties</h3>
-        <div className="flex items-center gap-1">
+    <aside className="flex w-80 flex-shrink-0 flex-col overflow-hidden border-l border-slate-200 bg-white">
+      {/* ── Dark navy header ──────────────────────────────────────────── */}
+      <div className="flex flex-shrink-0 flex-col bg-[#0f1b2d]">
+        {/* Back label */}
+        <div className="flex items-center gap-1.5 px-3.5 pt-2.5 pb-1">
+          <svg className="h-3 w-3 text-slate-400" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10 12L6 8l4-4" />
+          </svg>
+          <span className="text-[11px] text-slate-400">Selected</span>
+        </div>
+
+        {/* Node name */}
+        <p className="px-3.5 pb-1 text-[15px] font-medium leading-snug tracking-tight text-white break-words">
+          {data.label}
+        </p>
+
+        {/* Tab row */}
+        <div className="mt-1 flex border-t border-white/10">
           <button
-            onClick={handleReset}
-            title="Reset changes"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-amber-50 hover:text-amber-600"
+            className={`${tabBase} ${activeTab === "properties" ? tabActive : tabInactive}`}
+            onClick={() => setActiveTab("properties")}
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
-            </svg>
+            Node properties
           </button>
           <button
-            onClick={() => {
-              if (window.confirm(`Delete "${data.label}" and all its children?`)) {
-                onDeleteNode?.(node.id);
-              }
-            }}
-            title={`Delete "${data.label}" permanently`}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-red-50 hover:text-red-500"
+            className={`${tabBase} ${activeTab === "chat" ? tabActive : tabInactive}`}
+            onClick={() => setActiveTab("chat")}
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-            </svg>
+            AI chat
           </button>
         </div>
       </div>
 
-      <div className="mt-4 space-y-4 text-sm">
-        {/* ── Selected name ── */}
-        <div>
-          <span className="block text-xs text-slate-400">Selected</span>
-          <span className="mt-0.5 block break-words font-medium text-slate-800">{data.label}</span>
-        </div>
+      {/* ── Properties panel ──────────────────────────────────────────── */}
+      {activeTab === "properties" && (
+        <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Scrollable content */}
+          <div className="flex-1 overflow-y-auto p-5">
+            {/* Header controls */}
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-800">Properties</h3>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleReset}
+                  title="Reset changes"
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-amber-50 hover:text-amber-600"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Delete "${data.label}" and all its children?`)) {
+                      onDeleteNode?.(node.id);
+                    }
+                  }}
+                  title={`Delete "${data.label}" permanently`}
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-red-50 hover:text-red-500"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                  </svg>
+                </button>
+              </div>
+            </div>
 
-        {/* ── Level badge ── */}
-        <div className="flex items-center justify-between">
-          <span className="text-slate-400">Level</span>
-          <span className="rounded bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">
-            {LEVEL_LABELS[data.level]}
-          </span>
-        </div>
+            <div className="space-y-4 text-sm">
+              {/* ── Level badge ── */}
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Level</span>
+                <span className="rounded bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">
+                  {LEVEL_LABELS[data.level]}
+                </span>
+              </div>
 
-        {/* ── Grandparent (read-only) ── */}
-        {data.level >= 2 && (
-          <div>
-            <span className="block text-xs text-slate-400">Grandparent</span>
-            <span
-              className="mt-0.5 block break-words text-xs text-slate-600"
-              title={grandparentCap?.name}
-            >
-              {grandparentCap?.name ?? "—"}
-            </span>
-          </div>
-        )}
-
-        {/* ── Parent dropdown ── */}
-        {data.level > 0 && validParents.length > 0 && (
-          <div>
-            <span className="mb-1 block text-slate-400">Parent</span>
-            <select
-              className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-200"
-              value={cap?.parent_id ?? ""}
-              onChange={(e) => handleParentChange(e.target.value)}
-            >
-              {cap?.parent_id === null && (
-                <option value="" disabled>
-                  — no parent —
-                </option>
+              {/* ── Grandparent (read-only) ── */}
+              {data.level >= 2 && (
+                <div>
+                  <span className="block text-xs text-slate-400">Grandparent</span>
+                  <span className="mt-0.5 block break-words text-xs text-slate-600" title={grandparentCap?.name}>
+                    {grandparentCap?.name ?? "—"}
+                  </span>
+                </div>
               )}
-              {validParents.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+
+              {/* ── Parent dropdown ── */}
+              {data.level > 0 && validParents.length > 0 && (
+                <div>
+                  <span className="mb-1 block text-slate-400">Parent</span>
+                  <select
+                    className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-200"
+                    value={cap?.parent_id ?? ""}
+                    onChange={(e) => handleParentChange(e.target.value)}
+                  >
+                    {cap?.parent_id === null && (
+                      <option value="" disabled>— no parent —</option>
+                    )}
+                    {validParents.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <hr className="border-slate-100" />
+
+              {/* ── Fill color ── */}
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Background</span>
+                <input
+                  type="color"
+                  className="h-6 w-8 cursor-pointer rounded border border-slate-200 p-0"
+                  value={data.fill || LEVEL_BG_DEFAULTS[data.level]}
+                  onChange={(e) => onUpdateNode?.(node.id, { fill: e.target.value })}
+                />
+              </div>
+
+              {/* ── Border color ── */}
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Border</span>
+                <input
+                  type="color"
+                  className="h-6 w-8 cursor-pointer rounded border border-slate-200 p-0"
+                  value={data.border || LEVEL_BORDER_DEFAULTS[data.level]}
+                  onChange={(e) => onUpdateNode?.(node.id, { border: e.target.value })}
+                />
+              </div>
+
+              {/* ── Note ── */}
+              <div>
+                <span className="block text-slate-400">Note</span>
+                <textarea
+                  className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-200"
+                  rows={2}
+                  placeholder="Add a note…"
+                  value={data.note || ""}
+                  onChange={(e) => onUpdateNode?.(node.id, { note: e.target.value })}
+                />
+              </div>
+
+              {/* ── Description ── */}
+              <div>
+                <span className="block text-slate-400">Description</span>
+                <textarea
+                  className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-200"
+                  rows={3}
+                  placeholder="Add a description…"
+                  value={data.description || ""}
+                  onChange={(e) => onUpdateNode?.(node.id, { description: e.target.value })}
+                />
+              </div>
+
+              {/* ── Children multiselect (L1 → L2, L2 → L3) ── */}
+              {childLevel !== null && (
+                <>
+                  <hr className="border-slate-100" />
+                  <ChildrenPanel
+                    parentId={node.id}
+                    childLevel={childLevel as 0 | 1 | 2 | 3}
+                    capabilities={capabilities}
+                    onAttach={(childId) => onReparent?.(childId, node.id)}
+                    onDetach={(childId) => onDetachChild?.(childId)}
+                    onDelete={(childId) => onDeleteChild?.(childId)}
+                  />
+                </>
+              )}
+            </div>
           </div>
-        )}
-
-        {/* ── Divider ── */}
-        <hr className="border-slate-100" />
-
-        {/* ── Fill color (container/background) ── */}
-        <div className="flex items-center justify-between">
-          <span className="text-slate-400">Background</span>
-          <input
-            type="color"
-            className="h-6 w-8 cursor-pointer rounded border border-slate-200 p-0"
-            value={data.fill || LEVEL_BG_DEFAULTS[data.level]}
-            onChange={(e) => onUpdateNode?.(node.id, { fill: e.target.value })}
-          />
         </div>
+      )}
 
-        {/* ── Border color ── */}
-        <div className="flex items-center justify-between">
-          <span className="text-slate-400">Border</span>
-          <input
-            type="color"
-            className="h-6 w-8 cursor-pointer rounded border border-slate-200 p-0"
-            value={data.border || LEVEL_BORDER_DEFAULTS[data.level]}
-            onChange={(e) => onUpdateNode?.(node.id, { border: e.target.value })}
-          />
+      {/* ── AI chat panel ─────────────────────────────────────────────── */}
+      {activeTab === "chat" && (
+        <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto space-y-3 p-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb]:bg-slate-200">
+            {messages.map((msg, i) => (
+              <div
+                key={i}
+                className={`flex flex-col gap-1 ${msg.role === "user" ? "items-end" : "items-start"}`}
+              >
+                <span
+                  className={`text-[10px] font-semibold uppercase tracking-widest px-0.5 ${
+                    msg.role === "user" ? "text-blue-400" : "text-slate-400"
+                  }`}
+                >
+                  {msg.role === "user" ? "You" : "AI"}
+                </span>
+                {/* Context pill for AI messages when context is on */}
+                {msg.role === "ai" && includeContext && i > 0 && (
+                  <div className="flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700">
+                    <svg className="h-3 w-3" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
+                      <rect x="2" y="2" width="12" height="12" rx="2" />
+                      <path d="M5 8h6M5 5h6M5 11h4" />
+                    </svg>
+                    {data.label}
+                  </div>
+                )}
+                <div
+                  className={`max-w-[90%] rounded-xl px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap ${
+                    msg.role === "user"
+                      ? "rounded-br-sm bg-blue-500 text-white"
+                      : "rounded-bl-sm border border-slate-200 bg-slate-50 text-slate-700"
+                  }`}
+                >
+                  {msg.text}
+                </div>
+              </div>
+            ))}
+
+            {/* Typing indicator */}
+            {isTyping && (
+              <div className="flex flex-col gap-1 items-start">
+                <span className="text-[10px] font-semibold uppercase tracking-widest px-0.5 text-slate-400">AI</span>
+                <div className="flex items-center gap-1 rounded-xl rounded-bl-sm border border-slate-200 bg-slate-50 px-3 py-2.5">
+                  {[0, 150, 300].map((delay) => (
+                    <span
+                      key={delay}
+                      className="h-1.5 w-1.5 rounded-full bg-slate-400 animate-bounce"
+                      style={{ animationDelay: `${delay}ms` }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Footer */}
+          <div className="flex-shrink-0 border-t border-slate-200 bg-white p-3 space-y-2.5">
+            {/* Context toggle */}
+            <button
+              className="flex items-center gap-2 text-[11px] text-slate-500 hover:text-slate-700 transition-colors"
+              onClick={() => setIncludeContext((v) => !v)}
+            >
+              {/* Toggle track */}
+              <span
+                className={`relative inline-flex h-4 w-7 flex-shrink-0 rounded-full transition-colors duration-200 ${
+                  includeContext ? "bg-blue-500" : "bg-slate-300"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all duration-200 ${
+                    includeContext ? "left-3.5" : "left-0.5"
+                  }`}
+                />
+              </span>
+              Include selected node context
+            </button>
+
+            {/* Input row */}
+            <div className="flex items-end gap-2">
+              <textarea
+                className="flex-1 resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-700 placeholder:text-slate-400 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 [&::-webkit-scrollbar]:w-1"
+                rows={1}
+                placeholder="Ask about this node…"
+                value={inputText}
+                onChange={(e) => {
+                  setInputText(e.target.value);
+                  // Auto-grow up to 4 rows
+                  e.target.style.height = "auto";
+                  e.target.style.height = Math.min(e.target.scrollHeight, 96) + "px";
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+              />
+              <button
+                onClick={handleSend}
+                disabled={isTyping || !inputText.trim()}
+                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-blue-500 text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" />
+                </svg>
+              </button>
+            </div>
+          </div>
         </div>
-
-        {/* ── Note ── */}
-        <div>
-          <span className="block text-slate-400">Note</span>
-          <textarea
-            className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-200"
-            rows={2}
-            placeholder="Add a note…"
-            value={data.note || ""}
-            onChange={(e) => onUpdateNode?.(node.id, { note: e.target.value })}
-          />
-        </div>
-
-        {/* ── Description ── */}
-        <div>
-          <span className="block text-slate-400">Description</span>
-          <textarea
-            className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs text-slate-700 outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-200"
-            rows={3}
-            placeholder="Add a description…"
-            value={data.description || ""}
-            onChange={(e) => onUpdateNode?.(node.id, { description: e.target.value })}
-          />
-        </div>
-
-        {/* ── Children multiselect (L1 → L2, L2 → L3) ── */}
-        {childLevel !== null && (
-          <>
-            <hr className="border-slate-100" />
-            <ChildrenPanel
-              parentId={node.id}
-              childLevel={childLevel as 0 | 1 | 2 | 3}
-              capabilities={capabilities}
-              onAttach={(childId) => onReparent?.(childId, node.id)}
-              onDetach={(childId) => onDetachChild?.(childId)}
-              onDelete={(childId) => onDeleteChild?.(childId)}
-            />
-          </>
-        )}
-      </div>
+      )}
     </aside>
   );
 }
