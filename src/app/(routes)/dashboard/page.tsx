@@ -20,6 +20,7 @@ import type { CapabilityNodeData } from "@/components/canvas/CapabilityNode";
 import LeftSidebar from "@/components/canvas/LeftSidebar";
 import RightSidebar from "@/components/canvas/RightSidebar";
 import CanvasToolbar from "@/components/canvas/CanvasToolbar";
+import AIMapEditor from "@/components/canvas/AIMapEditor";
 import { buildCanvasNodes } from "@/lib/canvas/layoutEngine";
 import { handleNodeDragDrop } from "@/lib/canvas/dragDropHandler";
 import { executeCommands } from "@/lib/commands/executor";
@@ -73,6 +74,10 @@ function DashboardContent() {
   const [interactionMode, setInteractionMode] = useState<"select" | "pan">("select");
   const [dragMessage, setDragMessage] = useState<string | null>(null);
   const [nodeStyles, setNodeStyles] = useState<Record<string, NodeStylePatch>>({});
+  // AI Map Editor panel state
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiPickMode, setAiPickMode] = useState(false);
+  const [aiTargetNodeId, setAiTargetNodeId] = useState<string | null>(null);
   const [dropIndicator, setDropIndicator] = useState<{ x: number; y: number; width: number; targetId: string; mode: "after" | "into"; insertAfterId: string | null; newParentId: string | null } | null>(null);
   const dropIndicatorRef = useRef(dropIndicator);
   dropIndicatorRef.current = dropIndicator;
@@ -126,10 +131,17 @@ function DashboardContent() {
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node<CapabilityNodeData>) => {
       if (node.type === "capability") {
-        setSelectedNodeId(node.id);
+        if (aiPickMode) {
+          // Single-node pick mode: target node inside AI panel only
+          setAiTargetNodeId(node.id);
+        } else if (!aiPanelOpen) {
+          // AI panel closed: open right sidebar normally
+          setSelectedNodeId(node.id);
+        }
+        // AI panel open in map mode: ignore click (keep sidebar closed)
       }
     },
-    []
+    [aiPickMode, aiPanelOpen]
   );
 
   const onPaneClick = useCallback(() => setSelectedNodeId(null), []);
@@ -154,19 +166,20 @@ function DashboardContent() {
     const nextNodes = buildCanvasNodes(capabilities, visibleLevels).map((node) => {
       const styles = nodeStyles[node.id];
       const isSelected = node.id === selectedNodeId;
+      const isAiTarget = node.id === aiTargetNodeId;
       const level = node.data.level;
       return {
         ...node,
-        data: { ...node.data, ...styles, isSelected },
-        draggable: level >= 1,
-        // Only mark L3 as selected in ReactFlow (L1/L2 use data.isSelected for styling to avoid z-index override)
+        data: { ...node.data, ...styles, isSelected, pickMode: aiPickMode, isAiTarget },
+        draggable: aiPickMode ? false : level >= 1,
         selected: level === 3 ? isSelected : false,
-        zIndex: level === 0 ? -1 : level === 1 ? 0 : level === 2 ? 1 : 1000,
+        // In pick mode: flatten all z-index to 1 so every level is equally clickable
+        zIndex: aiPickMode ? 1 : (level === 0 ? -1 : level === 1 ? 0 : level === 2 ? 1 : 1000),
       };
     });
 
     setNodes(nextNodes);
-  }, [capabilities, selectedNodeId, visibleLevels, nodeStyles]);
+  }, [capabilities, selectedNodeId, aiTargetNodeId, aiPickMode, visibleLevels, nodeStyles]);
 
   const onNodeDragStart: NodeDragHandler = useCallback((_, node) => {
     setSelectedNodeId(node.id);
@@ -683,6 +696,25 @@ function DashboardContent() {
           {applyError && (
             <p className="text-xs text-red-500">{applyError}</p>
           )}
+          {/* AI map editor toggle */}
+          <button
+            onClick={() => {
+              setAiPanelOpen((v) => {
+                if (!v) setSelectedNodeId(null); // opening AI panel: close right sidebar
+                return !v;
+              });
+            }}
+            className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition ${
+              aiPanelOpen
+                ? "border-blue-500 bg-blue-500 text-white"
+                : "border-slate-200 bg-white text-slate-700 hover:border-blue-400 hover:text-blue-600"
+            }`}
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+            </svg>
+            AI map editor
+          </button>
           <button
             onClick={handleApply}
             disabled={applying || !isDirty}
@@ -719,7 +751,7 @@ function DashboardContent() {
       <div className="flex flex-1 overflow-hidden">
         <LeftSidebar visibleLevels={visibleLevels} onToggleLevel={onToggleLevel} />
 
-        {/* Canvas area — full space, no overlapping toolbar */}
+        {/* Canvas area */}
         <div className="relative flex-1 overflow-auto">
           <ReactFlow
             nodes={nodes}
@@ -802,9 +834,32 @@ function DashboardContent() {
               {dragMessage}
             </div>
           )}
+
+          {/* AI Map Editor panel — overlays the canvas from the right */}
+          <AIMapEditor
+            open={aiPanelOpen}
+            onClose={() => {
+              setAiPanelOpen(false);
+              setAiPickMode(false);
+              setAiTargetNodeId(null);
+            }}
+            capabilities={capabilities}
+            nodeStyles={nodeStyles}
+            selectedNodeId={aiTargetNodeId}
+            pickMode={aiPickMode}
+            onEnterPickMode={() => setAiPickMode(true)}
+            onExitPickMode={() => {
+              setAiPickMode(false);
+              setAiTargetNodeId(null);
+            }}
+            onAICommands={applyAICommands}
+            onUpdateNode={onUpdateNode}
+            onPickNode={(id) => setAiTargetNodeId(id || null)}
+          />
         </div>
 
-        {selectedNodeId && (
+        {/* Right sidebar — hidden when AI panel is open */}
+        {selectedNodeId && !aiPanelOpen && (
           <div className="relative flex flex-shrink-0">
             {/* Collapse arrow button */}
             <button
@@ -829,7 +884,6 @@ function DashboardContent() {
               onDetachChild={onDetachChild}
               onDeleteChild={onDeleteNode}
               onDeleteNode={onDeleteNode}
-              onAICommands={applyAICommands}
             />
           </div>
         )}
