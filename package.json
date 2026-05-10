@@ -11,6 +11,9 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.93.0",
     "@supabase/supabase-js": "^2.104.0",
+    "@types/file-saver": "^2.0.7",
+    "file-saver": "^2.0.5",
+    "html-to-image": "^1.11.13",
     "next": "^14.2.0",
     "openai": "^6.36.0",
     "react": "^18.3.0",

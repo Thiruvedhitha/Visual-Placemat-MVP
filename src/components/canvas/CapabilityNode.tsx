@@ -19,6 +19,8 @@ export interface CapabilityNodeData {
   isDragging?: boolean;
   isDropTarget?: boolean;
   isSelected?: boolean;
+  pickMode?: boolean;
+  isAiTarget?: boolean;
   // LeanIX-specific
   l0Color?: string;
   l0TextColor?: string;
@@ -44,8 +46,13 @@ const LEVEL_COLORS = {
 function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
   const width = data.colWidth ?? data.nodeWidth ?? 190;
   const height = data.nodeHeight;
-  // For L0/L1/L2, use data.isSelected (avoids ReactFlow z-index bump); L3 uses prop selected
   const isHighlighted = data.isSelected ?? selected;
+  // Pick mode: amber ring on hover; AI-targeted node: teal ring
+  const pickBorder = data.isAiTarget
+    ? "0 0 0 3px #14b8a6"        // teal = currently targeted
+    : data.pickMode
+    ? "0 0 0 2px rgba(251,191,36,0.5)" // amber = hoverable in pick mode
+    : undefined;
 
   // ── L0: Dark navy horizontal banner ──
   if (data.level === 0) {
@@ -63,11 +70,11 @@ function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
           border: `2.5px solid ${isHighlighted ? "#f59e0b" : borderColor}`,
           boxShadow: isHighlighted
             ? "0 0 0 3px #f59e0b"
-            : "0 3px 10px rgba(0,0,0,0.15)",
+            : pickBorder ?? "0 3px 10px rgba(0,0,0,0.15)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          cursor: "pointer",
+          cursor: data.pickMode ? "pointer" : "pointer",
         }}
       >
         <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
@@ -107,11 +114,11 @@ function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
           border: `3px solid ${isHighlighted ? "#f59e0b" : borderColor}`,
           boxShadow: isHighlighted
             ? "none"
-            : "0 2px 8px rgba(0,0,0,0.12)",
+            : pickBorder ?? "0 2px 8px rgba(0,0,0,0.12)",
           background: headerColor,
           display: "flex",
           flexDirection: "column",
-          cursor: "grab",
+          cursor: data.pickMode ? "pointer" : "grab",
           userSelect: "none",
         }}
       >
@@ -154,11 +161,11 @@ function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
           border: `3px solid ${isHighlighted ? "#f59e0b" : borderColor}`,
           boxShadow: isHighlighted
             ? "none"
-            : "0 1px 4px rgba(0,0,0,0.1)",
+            : pickBorder ?? "0 1px 4px rgba(0,0,0,0.1)",
           background: bgColor,
           display: "flex",
           flexDirection: "column",
-          cursor: "grab",
+          cursor: data.pickMode ? "pointer" : "grab",
           userSelect: "none",
         }}
       >
@@ -207,13 +214,13 @@ function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
         background: data.fill || "#fff",
         border: `2px solid ${data.border || LEVEL_COLORS[3]}`,
         borderRadius: "4px",
-        cursor: "grab",
+        cursor: data.pickMode ? "pointer" : "grab",
         userSelect: "none",
         overflow: "hidden",
         wordBreak: "break-word",
         boxShadow: isHighlighted
           ? "0 0 0 2px #f59e0b"
-          : "0 1px 2px rgba(0,0,0,0.04)",
+          : pickBorder ?? "0 1px 2px rgba(0,0,0,0.04)",
       }}
     >
       <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />

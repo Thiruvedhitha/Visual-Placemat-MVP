@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { CapabilityNodeData } from "./CapabilityNode";
 import type { Capability } from "@/types/capability";
-import type { DiagramCommand, NodeStylePatch } from "@/lib/commands/index";
+import type { NodeStylePatch } from "@/lib/commands/index";
 
 const LEVEL_LABELS = ["L0 domain", "L1 group", "L2 subgroup", "L3 leaf"];
 
@@ -23,8 +23,6 @@ const LEVEL_BORDER_DEFAULTS: Record<number, string> = {
   3: "#d1e3ff",
 };
 
-type ChatMessage = { role: "user" | "ai"; text: string };
-
 interface RightSidebarProps {
   node: { id: string; data: CapabilityNodeData } | null;
   capabilities: Capability[];
@@ -38,8 +36,6 @@ interface RightSidebarProps {
   onDeleteChild?: (childId: string) => void;
   /** Permanently delete the currently selected node (and all its descendants) */
   onDeleteNode?: (nodeId: string) => void;
-  /** Apply AI-generated diagram commands to local state */
-  onAICommands?: (commands: DiagramCommand[]) => void;
 }
 
 // ── ChildrenPanel ────────────────────────────────────────────────────────────
@@ -240,11 +236,7 @@ export default function RightSidebar({
   onDetachChild,
   onDeleteChild,
   onDeleteNode,
-  onAICommands,
 }: RightSidebarProps) {
-  // Tab state
-  const [activeTab, setActiveTab] = useState<"properties" | "chat">("properties");
-
   // Track initial editable values when a node is first selected (for reset)
   const [initialData, setInitialData] = useState<{
     fill?: string;
@@ -253,103 +245,20 @@ export default function RightSidebar({
     description?: string;
   } | null>(null);
 
-  // AI chat state
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      role: "ai",
-      text: "Hi! I can help you edit, rename, restyle, or restructure this node. What would you like to do?",
-    },
-  ]);
-  const [inputText, setInputText] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
-  const [includeContext, setIncludeContext] = useState(true);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // Reset everything when a different node is selected
+  // Reset when a different node is selected
   useEffect(() => {
     if (node) {
       setInitialData({
-        fill: node.data.fill,
-        border: node.data.border,
-        note: node.data.note,
-        description: node.data.description,
+        fill: node.data.fill ?? undefined,
+        border: node.data.border ?? undefined,
+        note: node.data.note ?? undefined,
+        description: node.data.description ?? undefined,
       });
     } else {
       setInitialData(null);
     }
-    setActiveTab("properties");
-    setMessages([
-      {
-        role: "ai",
-        text: "Hi! I can help you edit, rename, restyle, or restructure this node. What would you like to do?",
-      },
-    ]);
-    setInputText("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [node?.id]);
-
-  // Auto-scroll chat messages
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isTyping]);
-
-  const handleSend = useCallback(async () => {
-    if (!inputText.trim() || isTyping || !node) return;
-
-    const userText = inputText.trim();
-    setInputText("");
-    setMessages((prev) => [...prev, { role: "user", text: userText }]);
-    setIsTyping(true);
-
-    try {
-      let fullPrompt = userText;
-      if (includeContext) {
-        const cap = capabilities.find((c) => c.id === node.id);
-        const parentCap = cap?.parent_id
-          ? capabilities.find((c) => c.id === cap.parent_id)
-          : null;
-        fullPrompt = `[Context: the selected node is "${node.data.label}" (${LEVEL_LABELS[node.data.level]})${
-          parentCap ? `, under "${parentCap.name}"` : ""
-        }]\n\n${userText}`;
-      }
-
-      const res = await fetch("/api/transform", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: fullPrompt,
-          capabilities,
-          nodeStyles,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setMessages((prev) => [
-          ...prev,
-          { role: "ai", text: `Error: ${data.error || "Something went wrong"}` },
-        ]);
-        return;
-      }
-
-      if (Array.isArray(data.commands) && data.commands.length > 0) {
-        onAICommands?.(data.commands);
-      }
-
-      setMessages((prev) => [
-        ...prev,
-        { role: "ai", text: data.summary || "Done!" },
-      ]);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: "ai", text: "Network error. Please try again." },
-      ]);
-    } finally {
-      setIsTyping(false);
-    }
-  }, [inputText, isTyping, node, capabilities, nodeStyles, includeContext, onAICommands]);
 
   // ── Empty state ──────────────────────────────────────────────────────────────
   if (!node) {
@@ -399,17 +308,10 @@ export default function RightSidebar({
   const childLevel =
     data.level === 1 ? 2 : data.level === 2 ? 3 : null;
 
-  // ── Tab styles ───────────────────────────────────────────────────────────────
-  const tabBase =
-    "flex-1 py-2.5 text-xs font-medium border-b-2 transition-colors duration-150 cursor-pointer";
-  const tabActive = "text-blue-400 border-blue-500";
-  const tabInactive =
-    "text-slate-500 border-transparent hover:text-slate-300 hover:border-slate-600";
-
   return (
     <aside className="flex w-80 flex-shrink-0 flex-col overflow-hidden border-l border-slate-200 bg-white">
       {/* ── Dark navy header ──────────────────────────────────────────── */}
-      <div className="flex flex-shrink-0 flex-col bg-[#0f1b2d]">
+      <div className="flex flex-shrink-0 flex-col bg-[#0f1b2d] pb-3">
         {/* Back label */}
         <div className="flex items-center gap-1.5 px-3.5 pt-2.5 pb-1">
           <svg className="h-3 w-3 text-slate-400" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
@@ -419,30 +321,13 @@ export default function RightSidebar({
         </div>
 
         {/* Node name */}
-        <p className="px-3.5 pb-1 text-[15px] font-medium leading-snug tracking-tight text-white break-words">
+        <p className="px-3.5 text-[15px] font-medium leading-snug tracking-tight text-white break-words">
           {data.label}
         </p>
-
-        {/* Tab row */}
-        <div className="mt-1 flex border-t border-white/10">
-          <button
-            className={`${tabBase} ${activeTab === "properties" ? tabActive : tabInactive}`}
-            onClick={() => setActiveTab("properties")}
-          >
-            Node properties
-          </button>
-          <button
-            className={`${tabBase} ${activeTab === "chat" ? tabActive : tabInactive}`}
-            onClick={() => setActiveTab("chat")}
-          >
-            AI chat
-          </button>
-        </div>
       </div>
 
       {/* ── Properties panel ──────────────────────────────────────────── */}
-      {activeTab === "properties" && (
-        <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden">
           {/* Scrollable content */}
           <div className="flex-1 overflow-y-auto p-5">
             {/* Header controls */}
@@ -577,121 +462,6 @@ export default function RightSidebar({
             </div>
           </div>
         </div>
-      )}
-
-      {/* ── AI chat panel ─────────────────────────────────────────────── */}
-      {activeTab === "chat" && (
-        <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto space-y-3 p-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb]:bg-slate-200">
-            {messages.map((msg, i) => (
-              <div
-                key={i}
-                className={`flex flex-col gap-1 ${msg.role === "user" ? "items-end" : "items-start"}`}
-              >
-                <span
-                  className={`text-[10px] font-semibold uppercase tracking-widest px-0.5 ${
-                    msg.role === "user" ? "text-blue-400" : "text-slate-400"
-                  }`}
-                >
-                  {msg.role === "user" ? "You" : "AI"}
-                </span>
-                {/* Context pill for AI messages when context is on */}
-                {msg.role === "ai" && includeContext && i > 0 && (
-                  <div className="flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700">
-                    <svg className="h-3 w-3" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
-                      <rect x="2" y="2" width="12" height="12" rx="2" />
-                      <path d="M5 8h6M5 5h6M5 11h4" />
-                    </svg>
-                    {data.label}
-                  </div>
-                )}
-                <div
-                  className={`max-w-[90%] rounded-xl px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap ${
-                    msg.role === "user"
-                      ? "rounded-br-sm bg-blue-500 text-white"
-                      : "rounded-bl-sm border border-slate-200 bg-slate-50 text-slate-700"
-                  }`}
-                >
-                  {msg.text}
-                </div>
-              </div>
-            ))}
-
-            {/* Typing indicator */}
-            {isTyping && (
-              <div className="flex flex-col gap-1 items-start">
-                <span className="text-[10px] font-semibold uppercase tracking-widest px-0.5 text-slate-400">AI</span>
-                <div className="flex items-center gap-1 rounded-xl rounded-bl-sm border border-slate-200 bg-slate-50 px-3 py-2.5">
-                  {[0, 150, 300].map((delay) => (
-                    <span
-                      key={delay}
-                      className="h-1.5 w-1.5 rounded-full bg-slate-400 animate-bounce"
-                      style={{ animationDelay: `${delay}ms` }}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Footer */}
-          <div className="flex-shrink-0 border-t border-slate-200 bg-white p-3 space-y-2.5">
-            {/* Context toggle */}
-            <button
-              className="flex items-center gap-2 text-[11px] text-slate-500 hover:text-slate-700 transition-colors"
-              onClick={() => setIncludeContext((v) => !v)}
-            >
-              {/* Toggle track */}
-              <span
-                className={`relative inline-flex h-4 w-7 flex-shrink-0 rounded-full transition-colors duration-200 ${
-                  includeContext ? "bg-blue-500" : "bg-slate-300"
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all duration-200 ${
-                    includeContext ? "left-3.5" : "left-0.5"
-                  }`}
-                />
-              </span>
-              Include selected node context
-            </button>
-
-            {/* Input row */}
-            <div className="flex items-end gap-2">
-              <textarea
-                className="flex-1 resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-700 placeholder:text-slate-400 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 [&::-webkit-scrollbar]:w-1"
-                rows={1}
-                placeholder="Ask about this node…"
-                value={inputText}
-                onChange={(e) => {
-                  setInputText(e.target.value);
-                  // Auto-grow up to 4 rows
-                  e.target.style.height = "auto";
-                  e.target.style.height = Math.min(e.target.scrollHeight, 96) + "px";
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }}
-              />
-              <button
-                onClick={handleSend}
-                disabled={isTyping || !inputText.trim()}
-                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-blue-500 text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </aside>
   );
 }

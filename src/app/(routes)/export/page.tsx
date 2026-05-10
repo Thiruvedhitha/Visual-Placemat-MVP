@@ -1,14 +1,25 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useRef, useCallback, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import ReactFlow, { ReactFlowProvider } from "reactflow";
+import "reactflow/dist/style.css";
+import { toPng } from "html-to-image";
+import { saveAs } from "file-saver";
+import { useCatalogStore } from "@/stores/catalogStore";
+import { buildCanvasNodes } from "@/lib/canvas/layoutEngine";
+import CapabilityNode from "@/components/canvas/CapabilityNode";
+
+const NODE_TYPES = { capability: CapabilityNode };
+const ALL_LEVELS = new Set([0, 1, 2, 3]);
 
 type ExportOption = {
   title: string;
   description: string;
   tag: string;
   actionLabel: string;
+  format: "png" | "svg" | "pdf" | "json" | "csv" | "xlsx" | "view-link" | "duplicate-link";
 };
 
 type ExportSection = {
@@ -29,12 +40,14 @@ const EXPORT_SECTIONS: ExportSection[] = [
         description: "Create a shareable read-only URL to the current diagram.",
         tag: "Link",
         actionLabel: "Create View Link",
+        format: "view-link",
       },
       {
         title: "Duplicate Link",
         description: "Open as an editable copy so teammates can branch independently.",
         tag: "Copy",
         actionLabel: "Create Duplicate Link",
+        format: "duplicate-link",
       },
     ],
   },
@@ -48,18 +61,21 @@ const EXPORT_SECTIONS: ExportSection[] = [
         description: "Raster image export for slides, docs, and chat sharing.",
         tag: "Image",
         actionLabel: "Export PNG",
+        format: "png",
       },
       {
         title: "SVG",
         description: "Scalable vector export for high-fidelity design workflows.",
         tag: "Vector",
         actionLabel: "Export SVG",
+        format: "svg",
       },
       {
         title: "PDF",
         description: "Page-friendly export for executive reviews and printing.",
         tag: "Document",
         actionLabel: "Export PDF",
+        format: "pdf",
       },
     ],
   },
@@ -73,18 +89,21 @@ const EXPORT_SECTIONS: ExportSection[] = [
         description: "Export full node, edge, and layout payload for re-import.",
         tag: "Schema",
         actionLabel: "Export JSON",
+        format: "json",
       },
       {
         title: "CSV",
         description: "Flat tabular export for spreadsheet and BI workflows.",
         tag: "Table",
         actionLabel: "Export CSV",
+        format: "csv",
       },
       {
         title: "Excel",
         description: "Workbook export preserving hierarchy columns and metadata.",
         tag: "XLSX",
         actionLabel: "Export Excel",
+        format: "xlsx",
       },
     ],
   },
@@ -99,7 +118,9 @@ export default function ExportPage() {
         </div>
       }
     >
-      <ExportContent />
+      <ReactFlowProvider>
+        <ExportContent />
+      </ReactFlowProvider>
     </Suspense>
   );
 }
@@ -107,9 +128,187 @@ export default function ExportPage() {
 function ExportContent() {
   const searchParams = useSearchParams();
   const catalogId = searchParams.get("catalogId");
+  const capabilities = useCatalogStore((s) => s.capabilities);
+  const catalogName = useCatalogStore((s) => s.catalogName);
+  const storeCatalogId = useCatalogStore((s) => s.catalogId);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [exporting, setExporting] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState<string | null>(null);
+
+  // Build nodes from store
+  const nodes = buildCanvasNodes(capabilities, ALL_LEVELS);
+
+  // Calculate canvas bounds for proper export
+  const getBounds = useCallback(() => {
+    if (!nodes.length) return { width: 800, height: 600 };
+    let maxX = 0, maxY = 0;
+    for (const n of nodes) {
+      const w = n.data.colWidth ?? n.data.nodeWidth ?? 190;
+      const h = n.data.nodeHeight ?? 44;
+      maxX = Math.max(maxX, n.position.x + w);
+      maxY = Math.max(maxY, n.position.y + h);
+    }
+    return { width: maxX + 80, height: maxY + 40 };
+  }, [nodes]);
+
+  const handleExport = useCallback(async (format: string) => {
+    // Handle link-based exports (no canvas needed)
+    if (format === "view-link") {
+      const id = storeCatalogId || catalogId;
+      if (!id) {
+        alert("Please save the catalog first (click Apply on the canvas) before creating a view link.");
+        return;
+      }
+      const viewUrl = `${window.location.origin}/view?catalogId=${encodeURIComponent(id)}`;
+      await navigator.clipboard.writeText(viewUrl);
+      setCopiedLink("view-link");
+      setTimeout(() => setCopiedLink(null), 3000);
+      return;
+    }
+    if (format === "duplicate-link") {
+      const id = storeCatalogId || catalogId;
+      if (!id) {
+        alert("Please save the catalog first (click Apply on the canvas) before creating a duplicate link.");
+        return;
+      }
+      const dupUrl = `${window.location.origin}/dashboard?catalogId=${encodeURIComponent(id)}`;
+      await navigator.clipboard.writeText(dupUrl);
+      setCopiedLink("duplicate-link");
+      setTimeout(() => setCopiedLink(null), 3000);
+      return;
+    }
+
+    if (!canvasRef.current) return;
+    setExporting(format);
+
+    // Give ReactFlow a moment to ensure nodes are fully painted
+    await new Promise((r) => setTimeout(r, 500));
+
+    try {
+      const flowEl = canvasRef.current.querySelector(".react-flow__viewport") as HTMLElement;
+      if (!flowEl) throw new Error("Canvas not found");
+
+      const { width, height } = getBounds();
+      const baseName = catalogName || "capability-map";
+
+      if (format === "png") {
+        const dataUrl = await toPng(flowEl, {
+          backgroundColor: "#f8fafc",
+          width,
+          height,
+          style: {
+            transform: "translate(30px, 20px) scale(1)",
+            transformOrigin: "top left",
+            width: `${width}px`,
+            height: `${height}px`,
+          },
+        });
+        // Convert data URL to blob for reliable download
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        saveAs(blob, `${baseName}.png`);
+      } else if (format === "svg") {
+        // Export as PNG embedded in SVG
+        const pngDataUrl = await toPng(flowEl, {
+          backgroundColor: "#f8fafc",
+          width,
+          height,
+          style: {
+            transform: "translate(30px, 20px) scale(1)",
+            transformOrigin: "top left",
+            width: `${width}px`,
+            height: `${height}px`,
+          },
+        });
+        const svgMarkup = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+  <rect width="100%" height="100%" fill="#f8fafc"/>
+  <image width="${width}" height="${height}" xlink:href="${pngDataUrl}"/>
+</svg>`;
+        // Use File object to ensure correct extension and type
+        const file = new File([svgMarkup], `${baseName}.svg`, { type: "image/svg+xml" });
+        saveAs(file);
+      } else if (format === "pdf") {
+        const dataUrl = await toPng(flowEl, {
+          backgroundColor: "#ffffff",
+          width,
+          height,
+          style: {
+            transform: "translate(30px, 20px) scale(1)",
+            transformOrigin: "top left",
+            width: `${width}px`,
+            height: `${height}px`,
+          },
+        });
+        const win = window.open("");
+        if (win) {
+          win.document.write(`
+            <html><head><title>${baseName}</title>
+            <style>@media print { body { margin: 0; } img { width: 100%; height: auto; } }</style>
+            </head><body>
+            <img src="${dataUrl}" style="max-width:100%;height:auto;" />
+            </body></html>
+          `);
+          win.document.close();
+          win.onload = () => { win.print(); };
+        }
+      } else if (format === "json") {
+        const json = JSON.stringify(capabilities, null, 2);
+        const blob = new Blob([json], { type: "application/json" });
+        saveAs(blob, `${baseName}.json`);
+      } else if (format === "csv") {
+        const header = "id,name,level,parent_id,sort_order,description,note";
+        const rows = capabilities.map((c) =>
+          [c.id, `"${(c.name || "").replace(/"/g, '""')}"`, c.level, c.parent_id || "", c.sort_order, `"${(c.description || "").replace(/"/g, '""')}"`, `"${(c.note || "").replace(/"/g, '""')}"`].join(",")
+        );
+        const csv = [header, ...rows].join("\n");
+        const blob = new Blob([csv], { type: "text/csv" });
+        saveAs(blob, `${baseName}.csv`);
+      }
+    } catch (err) {
+      console.error("Export failed:", err);
+      alert("Export failed. Please try again.");
+    } finally {
+      setExporting(null);
+    }
+  }, [capabilities, catalogName, storeCatalogId, catalogId, getBounds]);
+
+  const { width: canvasW, height: canvasH } = getBounds();
 
   return (
     <div className="min-h-screen bg-slate-50">
+      {/* Hidden canvas for export capture — rendered but not visible */}
+      <div
+        ref={canvasRef}
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          width: canvasW,
+          height: canvasH,
+          opacity: 0,
+          pointerEvents: "none",
+          zIndex: -1,
+          overflow: "hidden",
+        }}
+      >
+        <ReactFlow
+          nodes={nodes}
+          edges={[]}
+          nodeTypes={NODE_TYPES}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable={false}
+          zoomOnScroll={false}
+          panOnDrag={false}
+          preventScrolling={false}
+          defaultViewport={{ x: 30, y: 20, zoom: 1 }}
+          minZoom={1}
+          maxZoom={1}
+          proOptions={{ hideAttribution: true }}
+        />
+      </div>
+
       <main className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
         <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
           <div className="relative bg-gradient-to-r from-navy-950 via-brand-800 to-brand-600 px-6 py-10 text-white sm:px-10">
@@ -160,9 +359,21 @@ function ExportContent() {
                       <p className="min-h-12 text-xs leading-relaxed text-slate-500">{option.description}</p>
                       <button
                         type="button"
-                        className="mt-4 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-brand-300 hover:text-brand-700"
+                        onClick={() => handleExport(option.format)}
+                        disabled={exporting !== null}
+                        className={`mt-4 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold transition ${
+                          exporting === option.format
+                            ? "cursor-wait border-brand-300 text-brand-600"
+                            : copiedLink === option.format
+                            ? "border-green-300 text-green-600"
+                            : "text-slate-600 hover:border-brand-300 hover:text-brand-700"
+                        }`}
                       >
-                        {option.actionLabel}
+                        {exporting === option.format
+                          ? "Exporting…"
+                          : copiedLink === option.format
+                          ? "✓ Link Copied!"
+                          : option.actionLabel}
                       </button>
                     </div>
                   ))}
