@@ -668,7 +668,7 @@ function DashboardContent() {
 
   const exportHref = storeCatalogId
     ? `/export?catalogId=${encodeURIComponent(storeCatalogId)}`
-    : "#";
+    : "/export";
 
   return (
     <div className="flex h-[calc(100vh-var(--navbar-height))] flex-col overflow-hidden bg-slate-50">
