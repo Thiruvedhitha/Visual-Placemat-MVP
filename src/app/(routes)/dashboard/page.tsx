@@ -584,16 +584,13 @@ function DashboardContent() {
   const applyAICommands = useCallback(
     (commands: DiagramCommand[]) => {
       setCapabilities((prevCaps) => {
-        setNodeStyles((prevStyles: Record<string, NodeStylePatch>) => {
-          const result = executeCommands(commands, prevCaps, prevStyles);
-          useCatalogStore.setState({ capabilities: result.capabilities, isDirty: true });
-          setTimeout(() => setNodeStyles(result.nodePatches), 0);
-          return prevStyles;
-        });
-        return prevCaps;
+        const result = executeCommands(commands, prevCaps, nodeStyles);
+        setNodeStyles(result.nodePatches);
+        useCatalogStore.setState({ capabilities: result.capabilities, isDirty: true });
+        return result.capabilities;
       });
     },
-    []
+    [nodeStyles]
   );
 
   // Rebuild nodes when capabilities or visible levels change

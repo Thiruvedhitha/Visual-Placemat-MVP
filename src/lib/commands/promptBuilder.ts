@@ -39,10 +39,18 @@ Reply with ONLY a JSON object in this exact shape:
    Optional: set "reparentChildren": true to lift the node's direct children up to its parent instead of deleting them too.
 { "type": "DELETE_NODE", "nodeId": "<uuid>", "reparentChildren": true }
 
+6. ADD_NODE — add a new capability node
+{ "type": "ADD_NODE", "tempId": "<new-uuid-v4>", "parentId": "<uuid-of-parent>", "level": 1, "name": "Capability Name", "description": "optional text", "insertAfterId": "<uuid-of-sibling-or-null>" }
+   Level rules: L0 parentId must be null. L1 must go under L0. L2 under L1. L3 under L2.
+
+7. SET_DESCRIPTION — update the description of an existing node
+{ "type": "SET_DESCRIPTION", "nodeId": "<uuid>", "description": "New description text" }
+
 ## Rules
 - Use hex colour codes (e.g. "#ff0000") for colours. Never use CSS colour names.
 - Omit commands that are not needed.
 - Never invent node IDs. Use ONLY the IDs listed below.
+- For ADD_NODE, generate a valid UUID v4 string for tempId (format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx).
 - If the user's request cannot be fulfilled with the available commands, return an empty commands array and explain in "summary".
 
 ## Current Diagram
@@ -77,7 +85,8 @@ function renderTree(
       const styleNote = style
         ? ` [fill:${style.fill ?? "default"} border:${style.border ?? "default"}${style.note ? ` note:"${style.note}"` : ""}]`
         : "";
-      lines.push(`${prefix}L${cap.level} | ${cap.name} | id:${cap.id}${styleNote}`);
+      const descNote = cap.description ? ` desc:"${cap.description}"` : "";
+      lines.push(`${prefix}L${cap.level} | ${cap.name} | id:${cap.id}${styleNote}${descNote}`);
       walk(cap.id, indent + 1);
     }
   }

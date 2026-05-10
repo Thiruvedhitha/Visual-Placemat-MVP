@@ -153,6 +153,84 @@ export function executeCommands(
         break;
       }
 
+      case "ADD_NODE": {
+        // Validate parent exists when specified
+        if (cmd.parentId !== null) {
+          const parent = current.find((c) => c.id === cmd.parentId);
+          if (!parent) {
+            errors.push(`ADD_NODE: parent "${cmd.parentId}" not found`);
+            break;
+          }
+          if (parent.level !== cmd.level - 1) {
+            errors.push(
+              `ADD_NODE: level mismatch — L${cmd.level} node cannot be placed under L${parent.level} parent`
+            );
+            break;
+          }
+        }
+
+        // Derive catalog_id from a sibling or any existing capability
+        const catalogId =
+          current.find((c) => c.parent_id === cmd.parentId)?.catalog_id ??
+          current[0]?.catalog_id ??
+          "";
+
+        // Compute sort_order
+        const siblings = current.filter((c) => c.parent_id === cmd.parentId);
+        let newSortOrder: number;
+        if (cmd.insertAfterId) {
+          const afterSibling = siblings.find((s) => s.id === cmd.insertAfterId);
+          newSortOrder = afterSibling ? afterSibling.sort_order + 1 : siblings.length;
+          // Shift subsequent siblings up
+          current = current.map((c) =>
+            c.parent_id === cmd.parentId && c.sort_order >= newSortOrder && c.id !== cmd.tempId
+              ? { ...c, sort_order: c.sort_order + 1 }
+              : c
+          );
+        } else {
+          newSortOrder =
+            siblings.length > 0 ? Math.max(...siblings.map((s) => s.sort_order)) + 1 : 0;
+        }
+
+        const now = new Date().toISOString();
+        current = [
+          ...current,
+          {
+            id: cmd.tempId,
+            catalog_id: catalogId,
+            parent_id: cmd.parentId,
+            level: cmd.level,
+            name: cmd.name,
+            description: cmd.description ?? null,
+            note: null,
+            sort_order: newSortOrder,
+            source: "ai_generated",
+            is_deleted: false,
+            created_at: now,
+            updated_at: now,
+          },
+        ];
+        messages.push(`Added "${cmd.name}"`);
+        break;
+      }
+
+      case "SET_DESCRIPTION": {
+        const cap = current.find((c) => c.id === cmd.nodeId);
+        if (!cap) {
+          errors.push(`SET_DESCRIPTION: node "${cmd.nodeId}" not found`);
+          break;
+        }
+        current = current.map((c) =>
+          c.id === cmd.nodeId ? { ...c, description: cmd.description } : c
+        );
+        nodePatches[cmd.nodeId] = {
+          ...(nodePatches[cmd.nodeId] ?? {}),
+          description: cmd.description,
+        };
+        messages.push(`Description updated on "${cap.name}"`);
+        break;
+      }
+
       default:
         errors.push(`Unknown command type: ${(cmd as DiagramCommand).type}`);
     }
