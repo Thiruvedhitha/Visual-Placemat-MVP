@@ -8,6 +8,7 @@ import "reactflow/dist/style.css";
 import { toPng } from "html-to-image";
 import { saveAs } from "file-saver";
 import { jsPDF } from "jspdf";
+import * as XLSX from "xlsx";
 import { useCatalogStore } from "@/stores/catalogStore";
 import { buildCanvasNodes } from "@/lib/canvas/layoutEngine";
 import CapabilityNode from "@/components/canvas/CapabilityNode";
@@ -132,12 +133,26 @@ function ExportContent() {
   const capabilities = useCatalogStore((s) => s.capabilities);
   const catalogName = useCatalogStore((s) => s.catalogName);
   const storeCatalogId = useCatalogStore((s) => s.catalogId);
+  const nodeStyles = useCatalogStore((s) => s.nodeStyles);
   const canvasRef = useRef<HTMLDivElement>(null);
   const [exporting, setExporting] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
 
-  // Build nodes from store
-  const nodes = buildCanvasNodes(capabilities, ALL_LEVELS);
+  // Build nodes from store and apply persisted nodeStyles
+  const nodes = buildCanvasNodes(capabilities, ALL_LEVELS).map((n) => {
+    const styles = nodeStyles[n.id];
+    if (styles) {
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          fill: styles.fill ?? n.data.fill,
+          border: styles.border ?? n.data.border,
+        },
+      };
+    }
+    return n;
+  });
 
   // Calculate canvas bounds for proper export
   const getBounds = useCallback(() => {
@@ -295,14 +310,80 @@ function ExportContent() {
         const json = JSON.stringify(capabilities, null, 2);
         const blob = new Blob([json], { type: "application/json" });
         saveAs(blob, `${baseName}.json`);
-      } else if (format === "csv") {
-        const header = "id,name,level,parent_id,sort_order,description,note";
-        const rows = capabilities.map((c) =>
-          [c.id, `"${(c.name || "").replace(/"/g, '""')}"`, c.level, c.parent_id || "", c.sort_order, `"${(c.description || "").replace(/"/g, '""')}"`, `"${(c.note || "").replace(/"/g, '""')}"`].join(",")
-        );
-        const csv = [header, ...rows].join("\n");
-        const blob = new Blob([csv], { type: "text/csv" });
-        saveAs(blob, `${baseName}.csv`);
+      } else if (format === "csv" || format === "xlsx") {
+        // Build hierarchical rows — show parent names only on first occurrence
+        const l0s = capabilities.filter((c) => c.level === 0).sort((a, b) => a.sort_order - b.sort_order);
+
+        const rows: { l0: string; l1: string; l2: string; l3: string; description: string }[] = [];
+
+        for (const l0 of l0s) {
+          let l0Shown = false;
+          const l1s = capabilities.filter((c) => c.level === 1 && c.parent_id === l0.id).sort((a, b) => a.sort_order - b.sort_order);
+          if (l1s.length === 0) {
+            rows.push({ l0: l0.name, l1: "", l2: "", l3: "", description: l0.description || "" });
+            continue;
+          }
+          for (const l1 of l1s) {
+            let l1Shown = false;
+            const l2s = capabilities.filter((c) => c.level === 2 && c.parent_id === l1.id).sort((a, b) => a.sort_order - b.sort_order);
+            if (l2s.length === 0) {
+              rows.push({ l0: l0Shown ? "" : l0.name, l1: l1.name, l2: "", l3: "", description: l1.description || "" });
+              l0Shown = true;
+              continue;
+            }
+            for (const l2 of l2s) {
+              let l2Shown = false;
+              const l3s = capabilities.filter((c) => c.level === 3 && c.parent_id === l2.id).sort((a, b) => a.sort_order - b.sort_order);
+              if (l3s.length === 0) {
+                rows.push({ l0: l0Shown ? "" : l0.name, l1: l1Shown ? "" : l1.name, l2: l2.name, l3: "", description: l2.description || "" });
+                l0Shown = true;
+                l1Shown = true;
+                continue;
+              }
+              for (const l3 of l3s) {
+                rows.push({
+                  l0: l0Shown ? "" : l0.name,
+                  l1: l1Shown ? "" : l1.name,
+                  l2: l2Shown ? "" : l2.name,
+                  l3: l3.name,
+                  description: l3.description || "",
+                });
+                l0Shown = true;
+                l1Shown = true;
+                l2Shown = true;
+              }
+            }
+          }
+        }
+
+        const sheetData = [
+          ["L0 Capability Name", "L1 Capability Name", "L2 Capability Name", "L3 Capability Name", "Description"],
+          ...rows.map((r) => [r.l0, r.l1, r.l2, r.l3, r.description]),
+        ];
+
+        if (format === "csv") {
+          const csvRows = sheetData.map((row) =>
+            row.map((v) => `"${(v || "").replace(/"/g, '""')}"`).join(",")
+          );
+          const csv = csvRows.join("\n");
+          const blob = new Blob([csv], { type: "text/csv" });
+          saveAs(blob, `${baseName}.csv`);
+        } else {
+          const ws = XLSX.utils.aoa_to_sheet(sheetData);
+          // Set column widths
+          ws["!cols"] = [
+            { wch: 30 }, // L0
+            { wch: 30 }, // L1
+            { wch: 30 }, // L2
+            { wch: 30 }, // L3
+            { wch: 50 }, // Description
+          ];
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, "Capability Catalog");
+          const wbOut = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+          const blob = new Blob([wbOut], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+          saveAs(blob, `${baseName}.xlsx`);
+        }
       }
     } catch (err) {
       console.error("Export failed:", err);

@@ -21,7 +21,7 @@ export async function GET(
     // Fetch catalog metadata
     const { data: catalog, error: catError } = await supabaseAdmin
       .from("capability_catalogs")
-      .select("id, name, industry, created_at")
+      .select("id, name, industry, created_at, node_styles")
       .eq("id", catalogId)
       .single();
 

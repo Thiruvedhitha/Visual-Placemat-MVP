@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Capability } from "@/types/capability";
+import type { NodeStylePatch } from "@/lib/commands/index";
 
 export interface CatalogState {
   /** null = never saved to DB */
@@ -11,6 +12,8 @@ export interface CatalogState {
   industry: string | null;
   capabilities: Capability[];
   isDirty: boolean;
+  /** Per-node visual overrides (fill, border) — keyed by node ID */
+  nodeStyles: Record<string, NodeStylePatch>;
 }
 
 export interface CatalogActions {
@@ -38,6 +41,12 @@ export interface CatalogActions {
 
   /** Rename a single capability in the store */
   renameCapability: (id: string, newName: string) => void;
+
+  /** Update or merge node styles */
+  setNodeStyles: (styles: Record<string, NodeStylePatch>) => void;
+
+  /** Patch a single node's styles */
+  patchNodeStyle: (id: string, patch: Partial<NodeStylePatch>) => void;
 }
 
 const initialState: CatalogState = {
@@ -46,6 +55,7 @@ const initialState: CatalogState = {
   industry: null,
   capabilities: [],
   isDirty: false,
+  nodeStyles: {},
 };
 
 export const useCatalogStore = create<CatalogState & CatalogActions>()(
@@ -87,7 +97,17 @@ export const useCatalogStore = create<CatalogState & CatalogActions>()(
           ),
           isDirty: true,
         })),
-    }),
+      setNodeStyles: (styles) =>
+        set({ nodeStyles: styles, isDirty: true }),
+
+      patchNodeStyle: (id, patch) =>
+        set((state) => ({
+          nodeStyles: {
+            ...state.nodeStyles,
+            [id]: { ...state.nodeStyles[id], ...patch },
+          },
+          isDirty: true,
+        })),    }),
     {
       name: "visual-placemat-catalog",
     }

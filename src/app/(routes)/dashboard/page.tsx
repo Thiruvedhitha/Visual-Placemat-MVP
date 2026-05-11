@@ -73,7 +73,18 @@ function DashboardContent() {
   );
   const [interactionMode, setInteractionMode] = useState<"select" | "pan">("select");
   const [dragMessage, setDragMessage] = useState<string | null>(null);
-  const [nodeStyles, setNodeStyles] = useState<Record<string, NodeStylePatch>>({});
+  const [nodeStyles, setNodeStylesLocal] = useState<Record<string, NodeStylePatch>>(
+    () => useCatalogStore.getState().nodeStyles
+  );
+
+  // Wrapper that syncs local state to Zustand store
+  const setNodeStyles = useCallback((updater: Record<string, NodeStylePatch> | ((prev: Record<string, NodeStylePatch>) => Record<string, NodeStylePatch>)) => {
+    setNodeStylesLocal((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      useCatalogStore.setState({ nodeStyles: next });
+      return next;
+    });
+  }, []);
   // AI Map Editor panel state
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiPickMode, setAiPickMode] = useState(false);
@@ -88,10 +99,10 @@ function DashboardContent() {
   const { getIntersectingNodes, getNode } = useReactFlow();
   const viewport = useViewport();
 
-  // Load capabilities: Zustand first, then DB fallback
+  // Load capabilities: Zustand first (if matching catalog), then DB fallback
   useEffect(() => {
-    // If Zustand has capabilities, use those
-    if (storeCapabilities.length > 0) {
+    // If Zustand has capabilities for the same catalog, use those
+    if (storeCapabilities.length > 0 && (!catalogIdParam || catalogIdParam === storeCatalogId)) {
       setCapabilities(storeCapabilities);
       setLoading(false);
       return;
@@ -103,20 +114,23 @@ function DashboardContent() {
       return;
     }
     setLoading(true);
-    fetch(`/api/capabilities?catalogId=${encodeURIComponent(catalogIdParam)}`)
+    fetch(`/api/catalogs/${encodeURIComponent(catalogIdParam)}`)
       .then((r) => r.json())
       .then((data) => {
-        if (Array.isArray(data)) {
-          setCapabilities(data);
-          // Also populate the Zustand store so edits stay local
-          loadFromDB(catalogIdParam, catalogIdParam, data);
+        if (data.catalog && Array.isArray(data.capabilities)) {
+          setCapabilities(data.capabilities);
+          loadFromDB(catalogIdParam, data.catalog.name || catalogIdParam, data.capabilities);
+          // Load saved node styles from DB
+          if (data.catalog.node_styles && typeof data.catalog.node_styles === "object") {
+            setNodeStyles(data.catalog.node_styles);
+          }
         } else {
           setError(data.error || "Failed to load capabilities");
         }
       })
       .catch(() => setError("Network error"))
       .finally(() => setLoading(false));
-  }, [catalogIdParam, storeCapabilities, loadFromDB]);
+  }, [catalogIdParam, storeCapabilities, storeCatalogId, loadFromDB]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -623,6 +637,7 @@ function DashboardContent() {
           catalogId: storeCatalogId,
           catalogName,
           capabilities,
+          nodeStyles,
         }),
       });
       const data = await res.json();

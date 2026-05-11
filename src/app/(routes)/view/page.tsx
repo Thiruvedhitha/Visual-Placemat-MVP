@@ -193,6 +193,7 @@ function ViewContent() {
   const catalogId = searchParams.get("catalogId");
   const [capabilities, setCapabilities] = useState<Capability[]>([]);
   const [catalogName, setCatalogName] = useState("");
+  const [nodeStyles, setNodeStyles] = useState<Record<string, { fill?: string; border?: string }>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [visibleLevels, setVisibleLevels] = useState<Set<number>>(new Set([0, 1, 2, 3]));
@@ -224,6 +225,9 @@ function ViewContent() {
         const data = await res.json();
         setCatalogName(data.catalog.name);
         setCapabilities(data.capabilities);
+        if (data.catalog.node_styles && typeof data.catalog.node_styles === "object") {
+          setNodeStyles(data.catalog.node_styles);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load catalog");
       } finally {
@@ -234,10 +238,23 @@ function ViewContent() {
     loadCatalog();
   }, [catalogId]);
 
-  const nodes = useMemo(
-    () => buildCanvasNodes(capabilities, visibleLevels),
-    [capabilities, visibleLevels]
-  );
+  const nodes = useMemo(() => {
+    const raw = buildCanvasNodes(capabilities, visibleLevels);
+    return raw.map((n) => {
+      const styles = nodeStyles[n.id];
+      if (styles) {
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            fill: styles.fill ?? n.data.fill,
+            border: styles.border ?? n.data.border,
+          },
+        };
+      }
+      return n;
+    });
+  }, [capabilities, visibleLevels, nodeStyles]);
 
   const selectedNode = useMemo(() => {
     if (!selectedNodeId) return null;

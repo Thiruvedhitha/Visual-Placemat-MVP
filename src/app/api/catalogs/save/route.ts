@@ -10,7 +10,7 @@ import { supabaseAdmin } from "@/lib/db/postgres/client";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { catalogId, catalogName, capabilities } = body;
+    const { catalogId, catalogName, capabilities, nodeStyles } = body;
 
     if (!catalogName || !Array.isArray(capabilities) || capabilities.length === 0) {
       return NextResponse.json(
@@ -96,6 +96,20 @@ export async function POST(request: NextRequest) {
           tempToReal.set(levelCaps[i].id, row.id);
         });
       }
+    }
+
+    // Remap nodeStyles keys from client IDs to real DB UUIDs
+    if (nodeStyles && typeof nodeStyles === "object") {
+      const remappedStyles: Record<string, unknown> = {};
+      for (const [oldId, style] of Object.entries(nodeStyles)) {
+        const realId = tempToReal.get(oldId) ?? oldId;
+        remappedStyles[realId] = style;
+      }
+      const { error: styleError } = await supabaseAdmin
+        .from("capability_catalogs")
+        .update({ node_styles: remappedStyles })
+        .eq("id", finalCatalogId);
+      if (styleError) console.error("Failed to update node_styles:", styleError.message);
     }
 
     return NextResponse.json({
