@@ -75,11 +75,18 @@ export type NodeStylePatch = {
   description?: string;
 };
 
+export interface ChatHistoryMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface TransformRequest {
   prompt: string;
   capabilities: import("@/types/capability").Capability[];
   /** Current per-node visual overrides already on the canvas */
   nodeStyles?: Record<string, NodeStylePatch>;
+  /** Prior conversation turns to give the LLM context across messages */
+  history?: ChatHistoryMessage[];
 }
 
 export interface TransformResponse {

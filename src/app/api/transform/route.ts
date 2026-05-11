@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { buildCommandPrompt } from "@/lib/commands/promptBuilder";
-import type { TransformRequest, DiagramCommand } from "@/lib/commands/index";
+import type { TransformRequest, DiagramCommand, ChatHistoryMessage } from "@/lib/commands/index";
 import type { Capability } from "@/types/capability";
 
 export async function GET() {
@@ -32,21 +32,22 @@ function trimCapabilities(caps: Capability[], fullPrompt: string): Capability[] 
   const l2 = caps.filter((c) => c.level === 2);
   const l3 = caps.filter((c) => c.level === 3);
 
+  const matchesKeyword = (c: Capability) =>
+    words.some(
+      (w) =>
+        c.name.toLowerCase().includes(w) ||
+        (c.description ?? "").toLowerCase().includes(w)
+    );
+
   // L2 whose name or description contains a keyword from the actual request
   const matchedL2Ids = new Set(
-    l2
-      .filter((c) =>
-        words.some(
-          (w) =>
-            c.name.toLowerCase().includes(w) ||
-            (c.description ?? "").toLowerCase().includes(w)
-        )
-      )
-      .map((c) => c.id)
+    l2.filter(matchesKeyword).map((c) => c.id)
   );
 
-  // L3 children of matched L2s only (no sibling expansion — keeps token count low)
-  const relevantL3 = l3.filter((c) => matchedL2Ids.has(c.parent_id ?? ""));
+  // L3 children of matched L2s OR L3 nodes whose own name/description matches
+  const relevantL3 = l3.filter(
+    (c) => matchedL2Ids.has(c.parent_id ?? "") || matchesKeyword(c)
+  );
 
   // Fallback: no L2 matched → send all L2, skip L3 entirely
   const relevantL2 =
@@ -72,7 +73,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { prompt, capabilities, nodeStyles = {} } = body;
+  const { prompt, capabilities, nodeStyles = {}, history = [] } = body;
 
   if (!prompt || typeof prompt !== "string" || prompt.trim() === "") {
     return NextResponse.json({ error: "prompt is required" }, { status: 400 });
@@ -90,7 +91,15 @@ export async function POST(req: Request) {
   console.log("  Prompt       :", prompt.trim());
   console.log("  Capabilities :", capabilities.length, "total →", trimmed.length, "sent to AI");
   console.log("  NodeStyles   :", Object.keys(nodeStyles).length, "overrides");
+  console.log("  History turns:", history.length);
   console.log("─────────────────────────────────────────────────────────\n");
+
+  // Build history messages, capped at last 20 turns to stay within token limits
+  const recentHistory = (history as ChatHistoryMessage[]).slice(-20);
+  const historyMessages = recentHistory.map((m) => ({
+    role: m.role as "user" | "assistant",
+    content: m.content,
+  }));
 
   const gemini = new OpenAI({
     apiKey,
@@ -100,11 +109,12 @@ export async function POST(req: Request) {
   const callGemini = async () =>
     gemini.chat.completions.create({
       model: "gemini-2.5-flash",
-      max_tokens: 2048,
+      max_tokens: 8192,
       temperature: 0,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: systemPrompt },
+        ...historyMessages,
         { role: "user", content: prompt.trim() },
       ],
     });
@@ -147,7 +157,27 @@ export async function POST(req: Request) {
     console.log(content);
     console.log("─────────────────────────────────────────────────────────\n");
 
-    parsed = JSON.parse(content);
+    try {
+      parsed = JSON.parse(content);
+    } catch (parseErr) {
+      // Attempt to salvage complete commands from a truncated JSON response.
+      // Extract the commands array portion and close it at the last complete object.
+      const salvaged = content.replace(/,\s*\{[^{}]*$/, "").replace(/^([\s\S]*"commands"\s*:\s*\[)([\s\S]*)$/, (_, head, body) => {
+        const trimmedBody = body.replace(/,?\s*$/, "");
+        return `{${head.slice(head.indexOf('"commands"'))}${trimmedBody}], "summary": "(response truncated — partial results applied)"}`.replace(/^/, "{");
+      });
+      try {
+        // Simplest salvage: extract each complete {...} command object
+        const commandMatches = content.match(/\{[^{}]+\}/g) ?? [];
+        const salvageCmds = commandMatches
+          .map((s) => { try { return JSON.parse(s); } catch { return null; } })
+          .filter((o) => o && typeof o.type === "string" && typeof o.nodeId === "string");
+        parsed = { commands: salvageCmds, summary: "(response was truncated — partial results applied)" };
+        console.warn("[AI Transform] JSON truncated — salvaged", salvageCmds.length, "commands");
+      } catch {
+        throw parseErr;
+      }
+    }
   } catch (err: unknown) {
     const raw = err instanceof Error ? err.message : "Gemini API error";
     const userMsg = raw.includes("429")

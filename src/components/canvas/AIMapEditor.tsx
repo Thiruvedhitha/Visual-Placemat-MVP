@@ -44,6 +44,33 @@ export interface AIMapEditorProps {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+// ── localStorage helpers ─────────────────────────────────────────────────────
+
+function storageKey(catalogId: string, scope: Scope) {
+  return `vp_chat_${catalogId}_${scope}`;
+}
+
+function loadHistory(catalogId: string, scope: Scope): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(storageKey(catalogId, scope));
+    return raw ? (JSON.parse(raw) as ChatMessage[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(catalogId: string, scope: Scope, msgs: ChatMessage[]) {
+  try {
+    // Keep last 100 messages to avoid unbounded growth
+    const trimmed = msgs.slice(-100);
+    localStorage.setItem(storageKey(catalogId, scope), JSON.stringify(trimmed));
+  } catch {
+    // localStorage full or unavailable — silently skip
+  }
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export default function AIMapEditor({
   open,
   onClose,
@@ -64,6 +91,22 @@ export default function AIMapEditor({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // Derive catalogId from the first capability (all share the same catalog)
+  const catalogId = capabilities[0]?.catalog_id ?? "default";
+
+  // Load persisted history when the panel opens or the scope changes
+  useEffect(() => {
+    if (open) {
+      setMessages(loadHistory(catalogId, scope));
+      setInputText("");
+    }
+  }, [open, scope, catalogId]);
+
+  // Persist messages to localStorage whenever they change
+  useEffect(() => {
+    if (messages.length > 0) saveHistory(catalogId, scope, messages);
+  }, [messages, catalogId, scope]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
@@ -74,10 +117,10 @@ export default function AIMapEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope]);
 
-  useEffect(() => {
+  const clearHistory = useCallback(() => {
+    try { localStorage.removeItem(storageKey(catalogId, scope)); } catch { /* ignore */ }
     setMessages([]);
-    setInputText("");
-  }, [scope]);
+  }, [catalogId, scope]);
 
   const targetNode = scope === "node" && selectedNodeId
     ? capabilities.find((c) => c.id === selectedNodeId) ?? null
@@ -117,10 +160,17 @@ export default function AIMapEditor({
       setIsLoading(true);
 
       try {
+        // Build history from all previous completed turns (pairs of user+ai)
+        const history = messages.flatMap((m) =>
+          m.role === "user"
+            ? [{ role: "user" as const, content: m.text }]
+            : [{ role: "assistant" as const, content: m.text }]
+        );
+
         const res = await fetch("/api/transform", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: buildPrompt(trimmed), capabilities, nodeStyles }),
+          body: JSON.stringify({ prompt: buildPrompt(trimmed), capabilities, nodeStyles, history }),
         });
         const data = await res.json();
         if (!res.ok) {
@@ -250,14 +300,28 @@ export default function AIMapEditor({
           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-[10px] font-bold text-white">✦</span>
           <span className="text-sm font-semibold text-white">AI map editor</span>
         </div>
-        <button
-          onClick={onClose}
-          className="flex h-6 w-6 items-center justify-center rounded text-slate-400 transition hover:bg-white/10 hover:text-white"
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-1">
+          {messages.length > 0 && (
+            <button
+              onClick={clearHistory}
+              title="Clear chat history"
+              className="flex h-6 items-center gap-1 rounded px-1.5 text-[10px] font-medium text-slate-400 transition hover:bg-white/10 hover:text-red-400"
+            >
+              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Clear
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="flex h-6 w-6 items-center justify-center rounded text-slate-400 transition hover:bg-white/10 hover:text-white"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* ENTIRE MAP SCOPE */}
