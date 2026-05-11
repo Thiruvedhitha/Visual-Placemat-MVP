@@ -14,6 +14,7 @@
     "@types/file-saver": "^2.0.7",
     "file-saver": "^2.0.5",
     "html-to-image": "^1.11.13",
+    "jspdf": "^4.2.1",
     "next": "^14.2.0",
     "openai": "^6.36.0",
     "react": "^18.3.0",
