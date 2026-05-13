@@ -938,7 +938,7 @@ export default function AIMapEditor({
             </div>
           </div>
 
-          {/* Session messages — read-only */}
+          {/* Session messages */}
           <div className="min-h-0 flex-1 overflow-y-auto space-y-3 px-4 py-3 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb]:bg-white/10">
             {viewingSession.messages.map((msg, i) => (
               <div key={i} className={`flex flex-col gap-1 ${msg.role === "user" ? "items-end" : "items-start"}`}>
@@ -959,24 +959,52 @@ export default function AIMapEditor({
             ))}
           </div>
 
-          {/* Session commits summary */}
-          {viewingSession.commits.length > 0 && (
-            <div className="flex-shrink-0 border-t border-white/10 px-4 py-2.5">
-              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-slate-500">Changes in this session</p>
-              <div className="space-y-1 max-h-32 overflow-y-auto [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb]:bg-white/10">
-                {viewingSession.commits.map((c, ci) => (
-                  <div key={ci} className="flex items-start gap-2 text-[11px]">
-                    <span className="mt-0.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-blue-400" />
-                    <span className="flex-1 text-slate-300">{c.summary}</span>
-                    <span className="flex-shrink-0 tabular-nums text-slate-500">
-                      {c.adds > 0 && <span className="text-emerald-400">+{c.adds}</span>}
-                      {c.deletes > 0 && <span className="ml-1 text-red-400">-{c.deletes}</span>}
-                    </span>
-                  </div>
-                ))}
-              </div>
+          {/* Input box — continue from this session */}
+          <div className="flex-shrink-0 border-t border-white/10 px-4 py-3">
+            <p className="mb-2 text-center text-[10px] text-slate-500">Type to continue this conversation</p>
+            <div className="flex items-end gap-2">
+              <textarea
+                ref={inputRef}
+                className="flex-1 resize-none rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-[13px] text-white placeholder:text-slate-500 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-500/40 disabled:opacity-40"
+                rows={1}
+                placeholder="Continue this chat…"
+                value={inputText}
+                disabled={isLoading}
+                onChange={(e) => {
+                  setInputText(e.target.value);
+                  e.target.style.height = "auto";
+                  e.target.style.height = Math.min(e.target.scrollHeight, 96) + "px";
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    // Restore session messages into active chat, then send
+                    const restored = viewingSession.messages.map(m => ({ role: m.role as "user" | "ai", text: m.text, ts: m.ts }));
+                    setMessages(restored);
+                    setCommits(viewingSession.commits ?? []);
+                    setViewingSession(null);
+                    // Send after state update
+                    setTimeout(() => sendMessage(inputText), 0);
+                  }
+                }}
+              />
+              <button
+                onClick={() => {
+                  const restored = viewingSession.messages.map(m => ({ role: m.role as "user" | "ai", text: m.text, ts: m.ts }));
+                  setMessages(restored);
+                  setCommits(viewingSession.commits ?? []);
+                  setViewingSession(null);
+                  setTimeout(() => sendMessage(inputText), 0);
+                }}
+                disabled={isLoading || !inputText.trim()}
+                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-blue-500 text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" />
+                </svg>
+              </button>
             </div>
-          )}
+          </div>
         </div>
       )}
 
