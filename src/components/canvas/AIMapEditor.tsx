@@ -145,19 +145,42 @@ export default function AIMapEditor({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Derive catalogId from Zustand store (real DB ID) or fallback to capability's catalog_id
+  // Derive catalogId from Zustand store (real DB UUID only)
   const storeCatalogId = useCatalogStore((s) => s.catalogId);
-  const catalogId = storeCatalogId ?? capabilities[0]?.catalog_id ?? null;
+  const capCatalogId = capabilities[0]?.catalog_id;
+  // Only use a catalogId that looks like a real UUID (not "unsaved", "default", temp IDs, etc.)
+  const isValidUUID = (id: string | null | undefined): id is string =>
+    !!id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  const catalogId = isValidUUID(storeCatalogId) ? storeCatalogId : isValidUUID(capCatalogId) ? capCatalogId : null;
+  const prevCatalogIdRef = useRef<string | null>(catalogId);
+  const flushedRef = useRef(false);
 
   // Load persisted history from Supabase when the panel opens or the scope changes
+  // But NOT when catalogId changes from null→UUID (first Apply) — keep in-memory messages
   useEffect(() => {
     if (open) {
-      loadHistoryFromDB(catalogId, scope).then(setMessages);
-      setProposalStates({});
-      setActiveForm(null);
+      const prev = prevCatalogIdRef.current;
+      const isFirstSave = !prev && catalogId;
+      if (!isFirstSave) {
+        loadHistoryFromDB(catalogId, scope).then(setMessages);
+        setProposalStates({});
+        setActiveForm(null);
+      }
       setInputText("");
     }
   }, [open, scope, catalogId]);
+
+  // When catalogId changes from null to a real UUID (after first Apply),
+  // flush all in-memory messages to the DB retroactively (once only)
+  useEffect(() => {
+    const prev = prevCatalogIdRef.current;
+    if (!prev && catalogId && !flushedRef.current && messages.length > 0) {
+      flushedRef.current = true;
+      const allMsgs = messages.map((m) => ({ role: m.role, text: m.text }));
+      saveMessagesToDB(catalogId, scope, allMsgs);
+    }
+    prevCatalogIdRef.current = catalogId;
+  }, [catalogId, messages, scope]);
 
   // No longer auto-persist to localStorage — messages are saved per-turn via API
 
@@ -238,15 +261,24 @@ export default function AIMapEditor({
           return [{ role: "assistant" as const, content: m.text }];
         });
 
+        const controller = new AbortController();
+        // Allow up to 3 minutes for rate-limit retries (15s + 30s + 60s + call time)
+        const timeoutId = setTimeout(() => controller.abort(), 180000);
+
         const res = await fetch("/api/transform", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
           // Always read capabilities from the store at call-time so renamed/added nodes are fresh
           body: JSON.stringify({ prompt: buildPrompt(trimmed), capabilities: useCatalogStore.getState().capabilities, nodeStyles, history, mode }),
         });
+        clearTimeout(timeoutId);
         const data = await res.json();
         if (!res.ok) {
-          const errText = `Error: ${data.error || "Something went wrong."}`;
+          const isRateLimit = data.error?.includes("rate limit");
+          const errText = isRateLimit
+            ? "⏳ AI rate limit reached. Please wait ~30 seconds and try again."
+            : `Error: ${data.error || "Something went wrong."}`;
           setMessages((prev) => [...prev, { role: "ai", text: errText }]);
           saveMessagesToDB(catalogId, scope, [{ role: "ai", text: errText }]);
           return;
@@ -280,8 +312,10 @@ export default function AIMapEditor({
           setMessages((prev) => [...prev, { role: "ai", text: aiText }]);
           saveMessagesToDB(catalogId, scope, [{ role: "ai", text: aiText }]);
         }
-      } catch {
-        const errText = "Network error. Please try again.";
+      } catch (err) {
+        const errText = err instanceof DOMException && err.name === "AbortError"
+          ? "⏳ Request timed out — the AI is busy. Please wait a moment and try again."
+          : "Network error. Please try again.";
         setMessages((prev) => [...prev, { role: "ai", text: errText }]);
         saveMessagesToDB(catalogId, scope, [{ role: "ai", text: errText }]);
       } finally {

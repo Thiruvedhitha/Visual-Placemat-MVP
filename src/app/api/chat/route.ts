@@ -54,6 +54,11 @@ export async function POST(req: Request) {
     .single();
 
   if (readErr) {
+    console.error("[/api/chat POST] Read error for catalog", catalogId, ":", readErr.message);
+    // If catalog not found, skip silently (may be a temp ID before first save)
+    if (readErr.code === "PGRST116") {
+      return NextResponse.json({ ok: true, skipped: true });
+    }
     return NextResponse.json({ error: readErr.message }, { status: 500 });
   }
 
