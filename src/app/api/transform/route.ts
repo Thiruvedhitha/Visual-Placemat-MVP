@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
-import { buildCommandPrompt } from "@/lib/commands/promptBuilder";
+import { buildCommandPrompt, buildSuggestionPrompt, buildChatPrompt } from "@/lib/commands/promptBuilder";
 import type { TransformRequest, DiagramCommand, ChatHistoryMessage } from "@/lib/commands/index";
 import type { Capability } from "@/types/capability";
 
@@ -73,7 +73,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { prompt, capabilities, nodeStyles = {}, history = [] } = body;
+  const { prompt, capabilities, nodeStyles = {}, history = [], mode = "command" } = body;
 
   if (!prompt || typeof prompt !== "string" || prompt.trim() === "") {
     return NextResponse.json({ error: "prompt is required" }, { status: 400 });
@@ -82,9 +82,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "capabilities array is required" }, { status: 400 });
   }
 
-  // Trim to relevant subset before building the prompt
-  const trimmed = trimCapabilities(capabilities, prompt);
-  const systemPrompt = buildCommandPrompt(trimmed, nodeStyles);
+  // For chat mode send all capabilities (don't trim — user may ask about any node)
+  const trimmed = mode === "chat" ? capabilities : trimCapabilities(capabilities, prompt);
+  const systemPrompt = mode === "suggest"
+    ? buildSuggestionPrompt(trimmed, nodeStyles)
+    : mode === "chat"
+    ? buildChatPrompt(trimmed, nodeStyles)
+    : buildCommandPrompt(trimmed, nodeStyles);
 
   // ── Request log ──────────────────────────────────────────────────────────────
   console.log("\n[AI Transform] ── Incoming request ──────────────────────");
@@ -108,10 +112,10 @@ export async function POST(req: Request) {
 
   const callGemini = async () =>
     gemini.chat.completions.create({
-      model: "gemini-2.5-flash",
+      model: "gemini-2.5-flash-lite",
       max_tokens: 8192,
-      temperature: 0,
-      response_format: { type: "json_object" },
+      // chat mode returns plain text — don't force JSON
+      ...(mode !== "chat" ? { response_format: { type: "json_object" as const } } : {}),
       messages: [
         { role: "system", content: systemPrompt },
         ...historyMessages,
@@ -119,9 +123,10 @@ export async function POST(req: Request) {
       ],
     });
 
-  // Exponential backoff: retry up to 3 times on 429 (6s → 12s → 24s)
+  // Exponential backoff: retry up to 3 times on 429 (15s → 30s → 60s)
+  // Gemini free tier is 15 RPM — need to wait at least one full minute
   const callGeminiWithRetry = async () => {
-    const delays = [6000, 12000, 24000];
+    const delays = [15000, 30000, 60000];
     let lastErr: unknown;
     for (let attempt = 0; attempt <= delays.length; attempt++) {
       try {
@@ -157,6 +162,11 @@ export async function POST(req: Request) {
     console.log(content);
     console.log("─────────────────────────────────────────────────────────\n");
 
+    // Chat mode: return plain text directly without JSON parsing
+    if (mode === "chat") {
+      return NextResponse.json({ reply: content.trim() });
+    }
+
     try {
       parsed = JSON.parse(content);
     } catch (parseErr) {
@@ -180,13 +190,20 @@ export async function POST(req: Request) {
     }
   } catch (err: unknown) {
     const raw = err instanceof Error ? err.message : "Gemini API error";
+    // Log the full error object so we can see the real Gemini response body
+    console.error("[AI Transform] ── ERROR ──────────────────────────────────");
+    console.error("  Message:", raw);
+    if (err && typeof err === "object" && "status" in err) {
+      console.error("  Status :", (err as { status: unknown }).status);
+    }
+    if (err && typeof err === "object" && "error" in err) {
+      console.error("  Body   :", JSON.stringify((err as { error: unknown }).error, null, 2));
+    }
+    console.error("─────────────────────────────────────────────────────────\n");
+
     const userMsg = raw.includes("429")
       ? "Gemini rate limit reached — please wait a few seconds and try again"
       : raw;
-
-    console.error("[AI Transform] ── ERROR ──────────────────────────────────");
-    console.error("  Message:", raw);
-    console.error("─────────────────────────────────────────────────────────\n");
     return NextResponse.json({ error: userMsg }, { status: 502 });
   }
 
@@ -198,6 +215,17 @@ export async function POST(req: Request) {
   console.log("  Summary  :", summary);
   console.log("  Commands :", JSON.stringify(commands, null, 2));
   console.log("─────────────────────────────────────────────────────────\n");
+
+  if (mode === "suggest") {
+    const proposals = Array.isArray((parsed as { proposals?: unknown[] }).proposals)
+      ? (parsed as { proposals: unknown[] }).proposals
+      : [];
+    console.log("[AI Transform] ── Proposals returned ────────────────────");
+    console.log("  Summary  :", parsed.summary ?? "");
+    console.log("  Count    :", proposals.length);
+    console.log("─────────────────────────────────────────────────────────\n");
+    return NextResponse.json({ proposals, summary: parsed.summary ?? "" });
+  }
 
   return NextResponse.json({ commands, summary });
 }

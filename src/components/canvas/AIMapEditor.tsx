@@ -2,8 +2,9 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { Capability } from "@/types/capability";
-import type { DiagramCommand, NodeStylePatch } from "@/lib/commands/index";
+import type { DiagramCommand, NodeStylePatch, Proposal } from "@/lib/commands/index";
 import type { CapabilityNodeData } from "./CapabilityNode";
+import { useCatalogStore } from "@/stores/catalogStore";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -17,14 +18,37 @@ const LEVEL_BORDER_DEFAULTS: Record<number, string> = {
 };
 
 type Scope = "map" | "node";
-type ChatMessage = { role: "user" | "ai"; text: string };
+type ChatMessage =
+  | { role: "user"; text: string }
+  | { role: "ai"; text: string; proposals?: Proposal[] };
 
-const MAP_QUICK_ACTIONS = [
-  { icon: "+", label: "Add node",          prompt: "Suggest a new capability node to add to this map. Specify the name, which level it should be (L0–L3), and which parent it should go under." },
-  { icon: "✎", label: "Rename node",       prompt: "Suggest better names for any nodes in this map that are unclear, inconsistent, or could be improved." },
-  { icon: "◐", label: "Modify properties", prompt: "Suggest property changes for nodes in this map — such as background color, border color, or reparenting to a better location in the hierarchy." },
-  { icon: "×", label: "Delete node",       prompt: "Identify any nodes in this map that are redundant, duplicate, or should be removed, and explain why." },
+/** Returns true when the user wants suggestions rather than direct changes */
+function isSuggestionPrompt(text: string): boolean {
+  const lower = text.toLowerCase();
+  const hasSuggestionWord = /\b(suggest|suggestion|recommend|recommendation|review|audit|check|analyze|analyse|what if|could you|identify|are there|show me|flag|find gaps)\b/.test(lower);
+  const hasDirectActionWord = /\b(rename|delete|remove|add|create|move|reparent|set the|update|change the)\b/.test(lower);
+  return hasSuggestionWord && !hasDirectActionWord;
+}
+
+/** Returns true for conversational/informational queries that need a plain text answer */
+function isInfoPrompt(text: string): boolean {
+  const lower = text.toLowerCase();
+  const hasInfoWord = /\b(list|show|display|what are|what is|how many|count|tell me|which|describe|overview|summarize|summary|give me|print|enumerate)\b/.test(lower);
+  const hasActionWord = /\b(rename|delete|remove|add|create|move|reparent|set|update|change|suggest|recommend)\b/.test(lower);
+  return hasInfoWord && !hasActionWord;
+}
+
+const AI_QUICK_ACTIONS: { icon: string; label: string; prompt: string; mode: "suggest" }[] = [
+  { icon: "✎", label: "Rename node",       mode: "suggest", prompt: "Suggest better names for any nodes in this map that are unclear, inconsistent, or could be improved." },
+  { icon: "◐", label: "Modify properties", mode: "suggest", prompt: "Suggest property changes for nodes in this map — such as background color, border color, or reparenting to a better location in the hierarchy." },
 ];
+
+function makeUUID(): string {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -43,31 +67,6 @@ export interface AIMapEditorProps {
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
-
-// ── localStorage helpers ─────────────────────────────────────────────────────
-
-function storageKey(catalogId: string, scope: Scope) {
-  return `vp_chat_${catalogId}_${scope}`;
-}
-
-function loadHistory(catalogId: string, scope: Scope): ChatMessage[] {
-  try {
-    const raw = localStorage.getItem(storageKey(catalogId, scope));
-    return raw ? (JSON.parse(raw) as ChatMessage[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveHistory(catalogId: string, scope: Scope, msgs: ChatMessage[]) {
-  try {
-    // Keep last 100 messages to avoid unbounded growth
-    const trimmed = msgs.slice(-100);
-    localStorage.setItem(storageKey(catalogId, scope), JSON.stringify(trimmed));
-  } catch {
-    // localStorage full or unavailable — silently skip
-  }
-}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -88,28 +87,33 @@ export default function AIMapEditor({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  // Per-message proposal state: messageIndex -> proposalId -> status
+  const [proposalStates, setProposalStates] = useState<Record<number, Record<string, "pending" | "accepted" | "declined">>>({});
+  // Form state for Add / Delete quick actions
+  const [activeForm, setActiveForm] = useState<"add" | "delete" | null>(null);
+  const [addName, setAddName] = useState("");
+  const [addLevel, setAddLevel] = useState<number>(1);
+  const [addParentId, setAddParentId] = useState("");
+  const [deleteNodeId, setDeleteNodeId] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Derive catalogId from the first capability (all share the same catalog)
   const catalogId = capabilities[0]?.catalog_id ?? "default";
 
-  // Load persisted history when the panel opens or the scope changes
+  // Reset chat when panel opens or scope changes — always start fresh
   useEffect(() => {
     if (open) {
-      setMessages(loadHistory(catalogId, scope));
+      setMessages([]);
+      setProposalStates({});
+      setActiveForm(null);
       setInputText("");
     }
   }, [open, scope, catalogId]);
 
-  // Persist messages to localStorage whenever they change
-  useEffect(() => {
-    if (messages.length > 0) saveHistory(catalogId, scope, messages);
-  }, [messages, catalogId, scope]);
-
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading]);
+  }, [messages, isLoading, activeForm]);
 
   useEffect(() => {
     if (scope === "node") onEnterPickMode();
@@ -118,9 +122,10 @@ export default function AIMapEditor({
   }, [scope]);
 
   const clearHistory = useCallback(() => {
-    try { localStorage.removeItem(storageKey(catalogId, scope)); } catch { /* ignore */ }
     setMessages([]);
-  }, [catalogId, scope]);
+    setProposalStates({});
+    setActiveForm(null);
+  }, []);
 
   const targetNode = scope === "node" && selectedNodeId
     ? capabilities.find((c) => c.id === selectedNodeId) ?? null
@@ -149,7 +154,7 @@ export default function AIMapEditor({
   );
 
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, explicitMode?: "command" | "suggest" | "chat") => {
       const trimmed = text.trim();
       if (!trimmed || isLoading) return;
       if (scope === "node" && !targetNode) return;
@@ -159,40 +164,102 @@ export default function AIMapEditor({
       setMessages((prev) => [...prev, { role: "user", text: trimmed }]);
       setIsLoading(true);
 
+      const mode = explicitMode ?? (isInfoPrompt(trimmed) ? "chat" : isSuggestionPrompt(trimmed) ? "suggest" : "command");
+
       try {
-        // Build history from all previous completed turns (pairs of user+ai)
-        const history = messages.flatMap((m) =>
-          m.role === "user"
-            ? [{ role: "user" as const, content: m.text }]
-            : [{ role: "assistant" as const, content: m.text }]
-        );
+        // Build history — for proposal messages, include what was accepted/declined
+        const history = messages.flatMap((m, idx) => {
+          if (m.role === "user") return [{ role: "user" as const, content: m.text }];
+          if (m.proposals && m.proposals.length > 0) {
+            const pState = proposalStates[idx] ?? {};
+            const lines: string[] = [];
+            m.proposals.forEach((p) => {
+              const status = pState[p.id] ?? "pending";
+              if (status === "accepted") lines.push(`[APPLIED] ${p.description}`);
+              else if (status === "declined") lines.push(`[DECLINED] ${p.description}`);
+            });
+            const content = lines.length > 0 ? lines.join("\n") : m.text;
+            return [{ role: "assistant" as const, content }];
+          }
+          return [{ role: "assistant" as const, content: m.text }];
+        });
 
         const res = await fetch("/api/transform", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: buildPrompt(trimmed), capabilities, nodeStyles, history }),
+          // Always read capabilities from the store at call-time so renamed/added nodes are fresh
+          body: JSON.stringify({ prompt: buildPrompt(trimmed), capabilities: useCatalogStore.getState().capabilities, nodeStyles, history, mode }),
         });
         const data = await res.json();
         if (!res.ok) {
           setMessages((prev) => [...prev, { role: "ai", text: `Error: ${data.error || "Something went wrong."}` }]);
           return;
         }
-        if (Array.isArray(data.commands) && data.commands.length > 0) {
-          onAICommands(data.commands);
+
+        if (mode === "chat") {
+          setMessages((prev) => [...prev, { role: "ai", text: data.reply || "No information found." }]);
+        } else if (mode === "suggest") {
+          const proposals: Proposal[] = Array.isArray(data.proposals) ? data.proposals : [];
+          const newMsg: ChatMessage = { role: "ai", text: data.summary || "Here are my suggestions:", proposals };
+          setMessages((prev) => {
+            const next = [...prev, newMsg];
+            // Initialise all proposals as pending
+            const msgIdx = next.length - 1;
+            if (proposals.length > 0) {
+              setProposalStates((ps) => ({
+                ...ps,
+                [msgIdx]: Object.fromEntries(proposals.map((p) => [p.id, "pending" as const])),
+              }));
+            }
+            return next;
+          });
+        } else {
+          if (Array.isArray(data.commands) && data.commands.length > 0) {
+            onAICommands(data.commands);
+          }
+          setMessages((prev) => [...prev, { role: "ai", text: data.summary || "Done." }]);
         }
-        setMessages((prev) => [...prev, { role: "ai", text: data.summary || "Done." }]);
       } catch {
         setMessages((prev) => [...prev, { role: "ai", text: "Network error. Please try again." }]);
       } finally {
         setIsLoading(false);
       }
     },
-    [isLoading, scope, targetNode, buildPrompt, capabilities, nodeStyles, onAICommands]
+    [isLoading, scope, targetNode, buildPrompt, capabilities, nodeStyles, onAICommands, messages, proposalStates]
   );
 
   if (!open) return null;
 
   const inputDisabled = isLoading || (scope === "node" && !targetNode);
+
+  // Valid parents for the Add form: level one above selected addLevel
+  const addFormParents = capabilities.filter((c) => c.level === addLevel - 1);
+
+  const submitAddForm = () => {
+    if (!addName.trim()) return;
+    const parentCap = addFormParents.find((c) => c.id === addParentId);
+    const parentLabel = parentCap ? `under '${parentCap.name}'` : "(no parent — L0)";
+    onAICommands([{
+      type: "ADD_NODE",
+      tempId: makeUUID(),
+      parentId: addLevel === 0 ? null : (addParentId || null),
+      level: addLevel as 0 | 1 | 2 | 3,
+      name: addName.trim(),
+    }]);
+    setMessages((prev) => [...prev, { role: "user", text: `Added L${addLevel} node: '${addName.trim()}' ${parentLabel}` }, { role: "ai", text: `Node '${addName.trim()}' added.` }]);
+    setActiveForm(null);
+    setAddName(""); setAddLevel(1); setAddParentId("");
+  };
+
+  const submitDeleteForm = () => {
+    if (!deleteNodeId) return;
+    const node = capabilities.find((c) => c.id === deleteNodeId);
+    if (!node) return;
+    onAICommands([{ type: "DELETE_NODE", nodeId: node.id }]);
+    setMessages((prev) => [...prev, { role: "user", text: `Delete node: '${node.name}'` }, { role: "ai", text: `Node '${node.name}' deleted.` }]);
+    setActiveForm(null);
+    setDeleteNodeId("");
+  };
 
   const ScopeToggle = (
     <div className="border-b border-white/10 px-4 py-3">
@@ -221,7 +288,7 @@ export default function AIMapEditor({
   const ChatSection = (
     <>
       <div className="flex-1 overflow-y-auto space-y-3 px-4 py-3 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb]:bg-white/10">
-        {messages.length === 0 && scope === "map" && (
+        {messages.length === 0 && scope === "map" && !activeForm && (
           <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-[13px] leading-relaxed text-slate-300">
             I have full context of your {capabilities.length}-node capability map. Ask me to restructure, find gaps, add nodes, rename sections, or analyse coverage.
           </div>
@@ -236,13 +303,83 @@ export default function AIMapEditor({
             <span className={`text-[10px] font-semibold uppercase tracking-widest px-0.5 ${msg.role === "user" ? "text-blue-400" : "text-slate-400"}`}>
               {msg.role === "user" ? "You" : "Map AI"}
             </span>
-            <div className={`max-w-[90%] rounded-xl px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap ${
-              msg.role === "user"
-                ? "rounded-br-sm bg-blue-500 text-white"
-                : "rounded-bl-sm border border-white/10 bg-white/5 text-slate-200"
-            }`}>
-              {msg.text}
-            </div>
+            {/* Only show text bubble when there are no proposals (avoid duplicate/verbose message) */}
+            {!(msg.role === "ai" && msg.proposals && msg.proposals.length > 0) && (
+              <div className={`max-w-[90%] rounded-xl px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap ${
+                msg.role === "user"
+                  ? "rounded-br-sm bg-blue-500 text-white"
+                  : "rounded-bl-sm border border-white/10 bg-white/5 text-slate-200"
+              }`}>
+                {msg.text}
+              </div>
+            )}
+            {/* Proposal cards */}
+            {msg.role === "ai" && msg.proposals && msg.proposals.length > 0 && (() => {
+              const pState = proposalStates[i] ?? {};
+              return (
+                <div className="w-full space-y-2 mt-1">
+                  {msg.proposals.map((proposal) => {
+                    const status = pState[proposal.id] ?? "pending";
+                    return (
+                      <div
+                        key={proposal.id}
+                        className={`rounded-xl border px-3 py-2.5 text-[12px] transition ${
+                          status === "accepted"
+                            ? "border-emerald-500/40 bg-emerald-500/10"
+                            : status === "declined"
+                            ? "border-red-500/20 bg-red-500/5 opacity-50"
+                            : "border-white/10 bg-white/5"
+                        }`}
+                      >
+                        <p className="leading-relaxed text-slate-200">{proposal.description}</p>
+                        {status === "pending" && (
+                          <div className="mt-2 flex gap-2">
+                            <button
+                              onClick={() => {
+                                // Apply immediately on accept
+                                onAICommands([proposal.command]);
+                                setProposalStates((ps) => ({
+                                  ...ps,
+                                  [i]: { ...(ps[i] ?? {}), [proposal.id]: "accepted" },
+                                }));
+                              }}
+                              className="flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-400 transition hover:bg-emerald-500/20"
+                            >
+                              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                              Accept
+                            </button>
+                            <button
+                              onClick={() =>
+                                setProposalStates((ps) => ({
+                                  ...ps,
+                                  [i]: { ...(ps[i] ?? {}), [proposal.id]: "declined" },
+                                }))
+                              }
+                              className="flex items-center gap-1 rounded-md border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-[11px] font-semibold text-red-400 transition hover:bg-red-500/20"
+                            >
+                              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                              Decline
+                            </button>
+                          </div>
+                        )}
+                        {status === "accepted" && (
+                          <p className="mt-1.5 flex items-center gap-1 text-[10px] font-semibold text-emerald-400">
+                            <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                            Accepted
+                          </p>
+                        )}
+                        {status === "declined" && (
+                          <p className="mt-1.5 flex items-center gap-1 text-[10px] font-semibold text-red-400">
+                            <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                            Declined
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         ))}
         {isLoading && (
@@ -256,6 +393,112 @@ export default function AIMapEditor({
           </div>
         )}
         <div ref={messagesEndRef} />
+
+        {/* Add form — appears at bottom after messages */}
+        {activeForm === "add" && (
+          <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-3 space-y-2.5">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-blue-400">Add a node</p>
+            <div>
+              <label className="text-[10px] text-slate-500">Node name</label>
+              <input
+                type="text"
+                autoFocus
+                className="mt-1 w-full rounded-md border border-white/15 bg-white/5 px-2 py-1.5 text-xs text-white placeholder:text-slate-600 outline-none focus:border-blue-400"
+                placeholder="e.g. Performance Reporting"
+                value={addName}
+                onChange={(e) => setAddName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") submitAddForm(); }}
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-slate-500">Level</label>
+              <div className="mt-1 flex gap-1">
+                {[0, 1, 2, 3].map((lvl) => (
+                  <button
+                    key={lvl}
+                    onClick={() => { setAddLevel(lvl); setAddParentId(""); }}
+                    className={`flex-1 rounded-md border py-1 text-[11px] font-bold transition ${
+                      addLevel === lvl
+                        ? "border-blue-400 bg-blue-500/20 text-white"
+                        : "border-white/15 bg-white/5 text-slate-400 hover:border-blue-400 hover:text-white"
+                    }`}
+                  >L{lvl}</button>
+                ))}
+              </div>
+            </div>
+            {addLevel > 0 && (
+              <div>
+                <label className="text-[10px] text-slate-500">Parent — L{addLevel - 1} node</label>
+                <select
+                  className="mt-1 w-full rounded-md border border-white/15 bg-[#0f1b2d] px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-blue-400"
+                  value={addParentId}
+                  onChange={(e) => setAddParentId(e.target.value)}
+                >
+                  <option value="">— select parent —</option>
+                  {addFormParents.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={submitAddForm}
+                disabled={!addName.trim() || (addLevel > 0 && !addParentId)}
+                className="flex-1 rounded-lg bg-blue-500 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-600 disabled:opacity-40"
+              >Add →</button>
+              <button
+                onClick={() => { setActiveForm(null); setAddName(""); setAddParentId(""); }}
+                className="flex-1 rounded-lg border border-white/15 py-1.5 text-xs text-slate-400 transition hover:border-white/30 hover:text-white"
+              >Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {/* Delete form — appears at bottom after messages */}
+        {activeForm === "delete" && (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 space-y-2.5">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-red-400">Delete a node</p>
+            <div>
+              <label className="text-[10px] text-slate-500">Select node to delete</label>
+              <select
+                className="mt-1 w-full rounded-md border border-white/15 bg-[#0f1b2d] px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-red-400"
+                value={deleteNodeId}
+                onChange={(e) => setDeleteNodeId(e.target.value)}
+              >
+                <option value="">— select node —</option>
+                {[0, 1, 2, 3].map((lvl) => {
+                  const lvlNodes = capabilities.filter((c) => c.level === lvl);
+                  if (!lvlNodes.length) return null;
+                  return (
+                    <optgroup key={lvl} label={`L${lvl} nodes`}>
+                      {lvlNodes.map((n) => (
+                        <option key={n.id} value={n.id}>{n.name}</option>
+                      ))}
+                    </optgroup>
+                  );
+                })}
+              </select>
+              {deleteNodeId && (() => {
+                const childCount = capabilities.filter((c) => c.parent_id === deleteNodeId).length;
+                return childCount > 0 ? (
+                  <p className="mt-1.5 text-[10px] text-amber-400">⚠ This node has {childCount} child{childCount > 1 ? "ren" : ""} that will also be deleted.</p>
+                ) : null;
+              })()}
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={submitDeleteForm}
+                disabled={!deleteNodeId}
+                className="flex-1 rounded-lg bg-red-500/80 py-1.5 text-xs font-semibold text-white transition hover:bg-red-600 disabled:opacity-40"
+              >Delete →</button>
+              <button
+                onClick={() => { setActiveForm(null); setDeleteNodeId(""); }}
+                className="flex-1 rounded-lg border border-white/15 py-1.5 text-xs text-slate-400 transition hover:border-white/30 hover:text-white"
+              >Cancel</button>
+            </div>
+          </div>
+        )}
       </div>
       <div className="flex-shrink-0 border-t border-white/10 px-4 py-3">
         {scope === "node" && !targetNode && (
@@ -343,14 +586,36 @@ export default function AIMapEditor({
             ))}
           </div>
 
-          {/* Quick actions */}
-          <div className="flex flex-shrink-0 flex-wrap gap-2 border-b border-white/10 px-4 py-3">
-            {MAP_QUICK_ACTIONS.map((action) => (
+          {/* Quick actions — 2x2 grid */}
+          <div className="flex-shrink-0 grid grid-cols-2 gap-1.5 border-b border-white/10 px-4 py-2.5">
+            <button
+              onClick={() => { setActiveForm(activeForm === "add" ? null : "add"); }}
+              disabled={isLoading}
+              className={`flex items-center justify-center gap-1 rounded-lg border py-1.5 text-xs font-medium transition ${
+                activeForm === "add"
+                  ? "border-blue-400 bg-blue-500/20 text-white"
+                  : "border-white/15 bg-white/5 text-slate-200 hover:border-blue-400 hover:bg-blue-500/10 hover:text-white"
+              } disabled:opacity-40`}
+            >
+              <span className="font-bold">+</span> Add node
+            </button>
+            <button
+              onClick={() => { setActiveForm(activeForm === "delete" ? null : "delete"); setDeleteNodeId(""); }}
+              disabled={isLoading}
+              className={`flex items-center justify-center gap-1 rounded-lg border py-1.5 text-xs font-medium transition ${
+                activeForm === "delete"
+                  ? "border-red-400 bg-red-500/20 text-red-300"
+                  : "border-white/15 bg-white/5 text-slate-200 hover:border-red-400 hover:bg-red-500/10 hover:text-red-300"
+              } disabled:opacity-40`}
+            >
+              <span className="font-bold">×</span> Delete node
+            </button>
+            {AI_QUICK_ACTIONS.map((action) => (
               <button
                 key={action.label}
-                onClick={() => sendMessage(action.prompt)}
+                onClick={() => { setActiveForm(null); sendMessage(action.prompt, action.mode); }}
                 disabled={isLoading}
-                className="flex items-center gap-1 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-medium text-slate-200 transition hover:border-blue-400 hover:bg-blue-500/10 hover:text-white disabled:opacity-40"
+                className="flex items-center justify-center gap-1 rounded-lg border border-white/15 bg-white/5 py-1.5 text-xs font-medium text-slate-200 transition hover:border-blue-400 hover:bg-blue-500/10 hover:text-white disabled:opacity-40"
               >
                 <span className="font-bold">{action.icon}</span>
                 {action.label}
