@@ -19,8 +19,8 @@ const LEVEL_BORDER_DEFAULTS: Record<number, string> = {
 
 type Scope = "map" | "node";
 type ChatMessage =
-  | { role: "user"; text: string }
-  | { role: "ai"; text: string; proposals?: Proposal[] };
+  | { role: "user"; text: string; ts?: string }
+  | { role: "ai"; text: string; ts?: string; proposals?: Proposal[] };
 
 /** Returns true when the user wants suggestions rather than direct changes */
 function isSuggestionPrompt(text: string): boolean {
@@ -50,6 +50,21 @@ function makeUUID(): string {
   });
 }
 
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 2) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks} wk${weeks > 1 ? "s" : ""} ago`;
+  const months = Math.floor(days / 30);
+  return `${months} mo${months > 1 ? "s" : ""} ago`;
+}
+
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 export interface AIMapEditorProps {
@@ -68,18 +83,20 @@ export interface AIMapEditorProps {
 
 // ── Supabase chat helpers ────────────────────────────────────────────────────
 
-async function loadHistoryFromDB(catalogId: string | null): Promise<ChatMessage[]> {
-  if (!catalogId) return []; // Not saved to DB yet
+async function loadHistoryFromDB(catalogId: string | null): Promise<{ messages: ChatMessage[]; commits: CommitEntry[]; sessions: ArchivedSession[] }> {
+  if (!catalogId) return { messages: [], commits: [], sessions: [] };
   try {
     const res = await fetch(`/api/chat?catalogId=${catalogId}`);
-    if (!res.ok) return [];
+    if (!res.ok) return { messages: [], commits: [], sessions: [] };
     const data = await res.json();
-    return (data.messages ?? []).map((m: { role: string; text: string }) => ({
+    const messages = (data.messages ?? []).map((m: { role: string; text: string; ts?: string }) => ({
       role: m.role as "user" | "ai",
       text: m.text,
+      ...(m.ts ? { ts: m.ts } : {}),
     }));
+    return { messages, commits: data.commits ?? [], sessions: data.sessions ?? [] };
   } catch {
-    return [];
+    return { messages: [], commits: [], sessions: [] };
   }
 }
 
@@ -115,6 +132,129 @@ async function clearHistoryFromDB(catalogId: string | null) {
   }
 }
 
+type CommitEntry = {
+  prompt: string;
+  summary: string;
+  adds: number;
+  deletes: number;
+  renames: number;
+  styles: number;
+  ts: string;
+};
+
+type ArchivedSession = {
+  name: string;
+  messages: { role: string; text: string; ts?: string }[];
+  commits: CommitEntry[];
+  ts: string;
+};
+
+async function saveCommitToDB(catalogId: string | null, commit: CommitEntry) {
+  if (!catalogId) return;
+  try {
+    await fetch("/api/chat", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ catalogId, commit }),
+    });
+  } catch {
+    // silently skip
+  }
+}
+
+async function archiveSessionToDB(catalogId: string | null) {
+  if (!catalogId) return;
+  try {
+    await fetch("/api/chat", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ catalogId, archiveSession: true }),
+    });
+  } catch {
+    // silently skip
+  }
+}
+
+function summarizeCommands(commands: import("@/lib/commands/index").DiagramCommand[]): Omit<CommitEntry, "prompt" | "summary" | "ts"> {
+  let adds = 0, deletes = 0, renames = 0, styles = 0;
+  for (const cmd of commands) {
+    switch (cmd.type) {
+      case "ADD_NODE": adds++; break;
+      case "DELETE_NODE": deletes++; break;
+      case "RENAME_NODE": renames++; break;
+      case "SET_STYLE": styles++; break;
+      case "REPARENT_NODE": renames++; break; // count as modification
+      case "SET_NOTE": case "SET_DESCRIPTION": styles++; break;
+    }
+  }
+  return { adds, deletes, renames, styles };
+}
+
+// ── SessionRow (for History tab) ──────────────────────────────────────────────
+
+function SessionRow({ session, msgCount, commitCount, totalAdds, totalDeletes, onOpen }: {
+  session: ArchivedSession;
+  msgCount: number;
+  commitCount: number;
+  totalAdds: number;
+  totalDeletes: number;
+  onOpen: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="border-b border-white/5">
+      {/* Main row — click to open the chat */}
+      <button
+        onClick={onOpen}
+        className="flex w-full items-start gap-2.5 px-4 py-3 text-left transition hover:bg-white/[0.03]"
+      >
+        {/* Chevron to expand commits inline */}
+        <svg
+          className={`mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
+          fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"
+          onClick={(e) => { e.stopPropagation(); setExpanded(v => !v); }}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+        </svg>
+        <div className="min-w-0 flex-1">
+          <p className="text-[12px] font-medium leading-snug text-slate-200 line-clamp-2">{session.name}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <span className="text-[10px] text-slate-500">{msgCount} msg{msgCount !== 1 ? "s" : ""}</span>
+            {totalAdds > 0 && <span className="text-[10px] font-semibold text-emerald-400">+{totalAdds}</span>}
+            {totalDeletes > 0 && <span className="text-[10px] font-semibold text-red-400">-{totalDeletes}</span>}
+            <span className="text-[10px] text-slate-600">{session.ts ? timeAgo(session.ts) : ""}</span>
+          </div>
+        </div>
+        <svg className="mt-1 h-3.5 w-3.5 shrink-0 text-slate-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+        </svg>
+      </button>
+      {expanded && (
+        <div className="border-t border-white/5 bg-white/[0.02] px-4 py-2 space-y-1.5">
+          {session.commits.length > 0 ? (
+            session.commits.map((c, ci) => (
+              <div key={ci} className="flex items-start gap-2">
+                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-400" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] text-slate-300 line-clamp-1">{c.summary}</p>
+                  <div className="flex items-center gap-2">
+                    {c.adds > 0 && <span className="text-[10px] font-semibold text-emerald-400">+{c.adds}</span>}
+                    {c.deletes > 0 && <span className="text-[10px] font-semibold text-red-400">-{c.deletes}</span>}
+                    {c.renames > 0 && <span className="text-[10px] font-semibold text-amber-400">~{c.renames}</span>}
+                    {c.styles > 0 && <span className="text-[10px] font-semibold text-violet-400">◉{c.styles}</span>}
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="text-[10px] text-slate-600 italic">Conversation only — no map changes</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function AIMapEditor({
@@ -134,6 +274,10 @@ export default function AIMapEditor({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<"chat" | "history">("chat");
+  const [commits, setCommits] = useState<CommitEntry[]>([]);
+  const [sessions, setSessions] = useState<ArchivedSession[]>([]);
+  const [viewingSession, setViewingSession] = useState<ArchivedSession | null>(null);
   // Per-message proposal state: messageIndex -> proposalId -> status
   const [proposalStates, setProposalStates] = useState<Record<number, Record<string, "pending" | "accepted" | "declined">>>({});
   // Form state for Add / Delete quick actions
@@ -162,7 +306,11 @@ export default function AIMapEditor({
       const prev = prevCatalogIdRef.current;
       const isFirstSave = !prev && catalogId;
       if (!isFirstSave) {
-        loadHistoryFromDB(catalogId).then(setMessages);
+        loadHistoryFromDB(catalogId).then(({ messages: msgs, commits: cmts, sessions: sess }) => {
+          setMessages(msgs);
+          setCommits(cmts);
+          setSessions(sess);
+        });
         setProposalStates({});
         setActiveForm(null);
       }
@@ -197,9 +345,35 @@ export default function AIMapEditor({
   const clearHistory = useCallback(() => {
     clearHistoryFromDB(catalogId);
     setMessages([]);
+    setCommits([]);
+    setSessions([]);
     setProposalStates({});
     setActiveForm(null);
-  }, []);
+    setViewingSession(null);
+  }, [catalogId]);
+
+  const startNewChat = useCallback(() => {
+    if (messages.length === 0) return; // nothing to archive
+    // Build session locally
+    const firstUserMsg = messages.find(m => m.role === "user");
+    const sessionName = firstUserMsg?.text?.slice(0, 80) || "Untitled chat";
+    const session: ArchivedSession = {
+      name: sessionName,
+      messages: messages.map(m => ({ role: m.role, text: m.text, ts: m.ts })),
+      commits: [...commits],
+      ts: new Date().toISOString(),
+    };
+    setSessions(prev => [...prev, session]);
+    // Clear active chat
+    setMessages([]);
+    setCommits([]);
+    setProposalStates({});
+    setActiveForm(null);
+    // Persist to DB
+    archiveSessionToDB(catalogId);
+    setActiveTab("chat");
+    setViewingSession(null);
+  }, [messages, commits, catalogId]);
 
   const targetNode = scope === "node" && selectedNodeId
     ? capabilities.find((c) => c.id === selectedNodeId) ?? null
@@ -235,7 +409,8 @@ export default function AIMapEditor({
 
       setInputText("");
       if (inputRef.current) inputRef.current.style.height = "auto";
-      setMessages((prev) => [...prev, { role: "user", text: trimmed }]);
+      const now = new Date().toISOString();
+      setMessages((prev) => [...prev, { role: "user", text: trimmed, ts: now }]);
       setIsLoading(true);
 
       const mode = explicitMode ?? (isInfoPrompt(trimmed) ? "chat" : isSuggestionPrompt(trimmed) ? "suggest" : "command");
@@ -279,18 +454,18 @@ export default function AIMapEditor({
           const errText = isRateLimit
             ? "⏳ AI rate limit reached. Please wait ~30 seconds and try again."
             : `Error: ${data.error || "Something went wrong."}`;
-          setMessages((prev) => [...prev, { role: "ai", text: errText }]);
+          setMessages((prev) => [...prev, { role: "ai", text: errText, ts: new Date().toISOString() }]);
           saveMessagesToDB(catalogId, [{ role: "ai", text: errText }]);
           return;
         }
 
         if (mode === "chat") {
           const aiText = data.reply || "No information found.";
-          setMessages((prev) => [...prev, { role: "ai", text: aiText }]);
+          setMessages((prev) => [...prev, { role: "ai", text: aiText, ts: new Date().toISOString() }]);
           saveMessagesToDB(catalogId, [{ role: "ai", text: aiText }]);
         } else if (mode === "suggest") {
           const proposals: Proposal[] = Array.isArray(data.proposals) ? data.proposals : [];
-          const newMsg: ChatMessage = { role: "ai", text: data.summary || "Here are my suggestions:", proposals };
+          const newMsg: ChatMessage = { role: "ai", text: data.summary || "Here are my suggestions:", ts: new Date().toISOString(), proposals };
           setMessages((prev) => {
             const next = [...prev, newMsg];
             // Initialise all proposals as pending
@@ -307,16 +482,26 @@ export default function AIMapEditor({
         } else {
           if (Array.isArray(data.commands) && data.commands.length > 0) {
             onAICommands(data.commands);
+            // Record commit
+            const stats = summarizeCommands(data.commands);
+            const commit: CommitEntry = {
+              prompt: trimmed,
+              summary: data.summary || "Applied changes",
+              ...stats,
+              ts: new Date().toISOString(),
+            };
+            setCommits((prev) => [...prev, commit]);
+            saveCommitToDB(catalogId, commit);
           }
           const aiText = data.summary || "Done.";
-          setMessages((prev) => [...prev, { role: "ai", text: aiText }]);
+          setMessages((prev) => [...prev, { role: "ai", text: aiText, ts: new Date().toISOString() }]);
           saveMessagesToDB(catalogId, [{ role: "ai", text: aiText }]);
         }
       } catch (err) {
         const errText = err instanceof DOMException && err.name === "AbortError"
           ? "⏳ Request timed out — the AI is busy. Please wait a moment and try again."
           : "Network error. Please try again.";
-        setMessages((prev) => [...prev, { role: "ai", text: errText }]);
+        setMessages((prev) => [...prev, { role: "ai", text: errText, ts: new Date().toISOString() }]);
         saveMessagesToDB(catalogId, [{ role: "ai", text: errText }]);
       } finally {
         setIsLoading(false);
@@ -344,6 +529,10 @@ export default function AIMapEditor({
       name: addName.trim(),
     }]);
     setMessages((prev) => [...prev, { role: "user", text: `Added L${addLevel} node: '${addName.trim()}' ${parentLabel}` }, { role: "ai", text: `Node '${addName.trim()}' added.` }]);
+    // Record commit
+    const commit: CommitEntry = { prompt: `Add L${addLevel} node: ${addName.trim()}`, summary: `Added '${addName.trim()}' ${parentLabel}`, adds: 1, deletes: 0, renames: 0, styles: 0, ts: new Date().toISOString() };
+    setCommits((prev) => [...prev, commit]);
+    saveCommitToDB(catalogId, commit);
     setActiveForm(null);
     setAddName(""); setAddLevel(1); setAddParentId("");
   };
@@ -354,6 +543,11 @@ export default function AIMapEditor({
     if (!node) return;
     onAICommands([{ type: "DELETE_NODE", nodeId: node.id }]);
     setMessages((prev) => [...prev, { role: "user", text: `Delete node: '${node.name}'` }, { role: "ai", text: `Node '${node.name}' deleted.` }]);
+    // Record commit
+    const childCount = capabilities.filter((c) => c.parent_id === node.id).length;
+    const commit: CommitEntry = { prompt: `Delete node: ${node.name}`, summary: `Deleted '${node.name}'${childCount > 0 ? ` and ${childCount} children` : ''}`, adds: 0, deletes: 1 + childCount, renames: 0, styles: 0, ts: new Date().toISOString() };
+    setCommits((prev) => [...prev, commit]);
+    saveCommitToDB(catalogId, commit);
     setActiveForm(null);
     setDeleteNodeId("");
   };
@@ -412,6 +606,16 @@ export default function AIMapEditor({
                                   ...ps,
                                   [i]: { ...(ps[i] ?? {}), [proposal.id]: "accepted" },
                                 }));
+                                // Record commit for accepted proposal
+                                const stats = summarizeCommands([proposal.command]);
+                                const commit: CommitEntry = {
+                                  prompt: proposal.description,
+                                  summary: "Accepted suggestion",
+                                  ...stats,
+                                  ts: new Date().toISOString(),
+                                };
+                                setCommits((prev) => [...prev, commit]);
+                                saveCommitToDB(catalogId, commit);
                               }}
                               className="flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-400 transition hover:bg-emerald-500/20"
                             >
@@ -616,8 +820,20 @@ export default function AIMapEditor({
         <div className="flex items-center gap-1">
           {messages.length > 0 && (
             <button
+              onClick={startNewChat}
+              title="Start new chat (archives current)"
+              className="flex h-6 items-center gap-1 rounded px-1.5 text-[10px] font-medium text-slate-400 transition hover:bg-white/10 hover:text-blue-400"
+            >
+              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              New
+            </button>
+          )}
+          {messages.length > 0 && (
+            <button
               onClick={clearHistory}
-              title="Clear chat history"
+              title="Clear all chat history"
               className="flex h-6 items-center gap-1 rounded px-1.5 text-[10px] font-medium text-slate-400 transition hover:bg-white/10 hover:text-red-400"
             >
               <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -637,8 +853,135 @@ export default function AIMapEditor({
         </div>
       </div>
 
+      {/* Tab toggle: Chat / History */}
+      <div className="flex flex-shrink-0 border-b border-white/10">
+        <button
+          onClick={() => { setActiveTab("chat"); setViewingSession(null); }}
+          className={`flex-1 py-2 text-xs font-semibold tracking-wide transition ${
+            activeTab === "chat"
+              ? "border-b-2 border-blue-400 text-blue-400"
+              : "text-slate-500 hover:text-slate-300"
+          }`}
+        >
+          Chat
+        </button>
+        <button
+          onClick={() => setActiveTab("history")}
+          className={`flex-1 py-2 text-xs font-semibold tracking-wide transition ${
+            activeTab === "history"
+              ? "border-b-2 border-blue-400 text-blue-400"
+              : "text-slate-500 hover:text-slate-300"
+          }`}
+        >
+          History
+        </button>
+      </div>
+
+      {/* ── HISTORY TAB ── */}
+      {activeTab === "history" && (() => {
+        const allSessions = [...sessions].reverse(); // newest first
+        return (
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/10">
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                Past Chats
+              </span>
+              <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-slate-400">
+                {allSessions.length}
+              </span>
+            </div>
+            <div className="flex-1 overflow-y-auto [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb]:bg-white/10">
+              {allSessions.length === 0 ? (
+                <div className="px-4 py-8 text-center">
+                  <svg className="mx-auto mb-2 h-8 w-8 text-slate-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0011.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
+                  </svg>
+                  <p className="text-xs text-slate-500">No past chats</p>
+                  <p className="mt-1 text-[10px] text-slate-600">Click &quot;New&quot; to archive the current chat and start fresh</p>
+                </div>
+              ) : (
+                <div>
+                  {allSessions.map((s, idx) => {
+                    const msgCount = s.messages.length;
+                    const commitCount = s.commits.length;
+                    const totalAdds = s.commits.reduce((n, c) => n + (c.adds || 0), 0);
+                    const totalDeletes = s.commits.reduce((n, c) => n + (c.deletes || 0), 0);
+                    return (
+                      <SessionRow key={idx} session={s} msgCount={msgCount} commitCount={commitCount} totalAdds={totalAdds} totalDeletes={totalDeletes} onOpen={() => { setViewingSession(s); setActiveTab("chat"); }} />
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── CHAT TAB ── */}
+      {activeTab === "chat" && (
+        <>
+      {/* ── READ-ONLY SESSION VIEW ── */}
+      {viewingSession && (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {/* Back header */}
+          <div className="flex flex-shrink-0 items-center gap-2 border-b border-white/10 px-3 py-2.5">
+            <button
+              onClick={() => { setViewingSession(null); setActiveTab("history"); }}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+            >
+              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+              History
+            </button>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-semibold text-white">{viewingSession.name}</p>
+              <p className="text-[10px] text-slate-500">{viewingSession.messages.length} messages · {timeAgo(viewingSession.ts)}</p>
+            </div>
+          </div>
+
+          {/* Session messages — read-only */}
+          <div className="min-h-0 flex-1 overflow-y-auto space-y-3 px-4 py-3 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb]:bg-white/10">
+            {viewingSession.messages.map((msg, i) => (
+              <div key={i} className={`flex flex-col gap-1 ${msg.role === "user" ? "items-end" : "items-start"}`}>
+                <span className={`text-[10px] font-semibold uppercase tracking-widest px-0.5 ${msg.role === "user" ? "text-blue-400" : "text-slate-400"}`}>
+                  {msg.role === "user" ? "You" : "Map AI"}
+                </span>
+                <div className={`max-w-[90%] rounded-xl px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap ${
+                  msg.role === "user"
+                    ? "rounded-br-sm bg-blue-500/80 text-white"
+                    : "rounded-bl-sm border border-white/10 bg-white/5 text-slate-200"
+                }`}>
+                  {msg.text}
+                </div>
+                {msg.ts && (
+                  <span className="px-0.5 text-[9px] text-slate-600">{timeAgo(msg.ts)}</span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Session commits summary */}
+          {viewingSession.commits.length > 0 && (
+            <div className="flex-shrink-0 border-t border-white/10 px-4 py-2.5">
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-slate-500">Changes in this session</p>
+              <div className="space-y-1 max-h-32 overflow-y-auto [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb]:bg-white/10">
+                {viewingSession.commits.map((c, ci) => (
+                  <div key={ci} className="flex items-start gap-2 text-[11px]">
+                    <span className="mt-0.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-blue-400" />
+                    <span className="flex-1 text-slate-300">{c.summary}</span>
+                    <span className="flex-shrink-0 tabular-nums text-slate-500">
+                      {c.adds > 0 && <span className="text-emerald-400">+{c.adds}</span>}
+                      {c.deletes > 0 && <span className="ml-1 text-red-400">-{c.deletes}</span>}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ENTIRE MAP SCOPE */}
-      {scope === "map" && (
+      {!viewingSession && scope === "map" && (
         <>
           {ScopeToggle}
 
@@ -698,7 +1041,7 @@ export default function AIMapEditor({
       )}
 
       {/* SINGLE NODE SCOPE */}
-      {scope === "node" && (
+      {!viewingSession && scope === "node" && (
         <>
           {ScopeToggle}
 
@@ -827,6 +1170,8 @@ export default function AIMapEditor({
 
           {targetNode && ChatSection}
         </>
+      )}
+      </>
       )}
     </div>
   );

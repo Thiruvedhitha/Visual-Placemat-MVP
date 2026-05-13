@@ -1,12 +1,22 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/db/postgres/client";
 
+export interface RecentCommit {
+  summary: string;
+  adds: number;
+  deletes: number;
+  renames: number;
+  styles: number;
+  ts: string;
+}
+
 export interface ClientCatalog {
   id: string;
   name: string;
   industry: string | null;
   updated_at: string;
   capability_count: number;
+  recent_commits: RecentCommit[];
 }
 
 export interface ClientFolder {
@@ -23,7 +33,7 @@ export async function GET() {
   const { data, error } = await supabaseAdmin
     .from("capability_catalogs")
     .select(
-      `id, name, client_name, industry, updated_at,
+      `id, name, client_name, industry, updated_at, chat_history,
        capabilities(count)`
     )
     .eq("status", "active")
@@ -40,6 +50,22 @@ export async function GET() {
     const key: string = row.client_name ?? "My Diagrams";
     if (!folderMap.has(key)) folderMap.set(key, []);
 
+    // Extract recent commits from chat_history
+    type CommitEntry = { summary: string; adds: number; deletes: number; renames: number; styles: number; ts: string };
+    type ChatHistory = { commits?: CommitEntry[] };
+    const chatHistory = (row as Record<string, unknown>).chat_history as ChatHistory | null;
+    const recentCommits: RecentCommit[] = (chatHistory?.commits ?? [])
+      .slice(-5)
+      .reverse()
+      .map((c: CommitEntry) => ({
+        summary: c.summary,
+        adds: c.adds ?? 0,
+        deletes: c.deletes ?? 0,
+        renames: c.renames ?? 0,
+        styles: c.styles ?? 0,
+        ts: c.ts || row.updated_at,
+      }));
+
     folderMap.get(key)!.push({
       id: row.id,
       name: row.name,
@@ -49,6 +75,7 @@ export async function GET() {
       capability_count: Number(
         (row.capabilities as unknown as { count: string }[])?.[0]?.count ?? 0
       ),
+      recent_commits: recentCommits,
     });
   }
 

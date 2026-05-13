@@ -35,10 +35,6 @@ export default function LeftSidebar({ visibleLevels, onToggleLevel }: LeftSideba
       .then((data: ClientFolder[]) => {
         if (Array.isArray(data)) {
           setFolders(data);
-          // Open first folder by default
-          if (data.length > 0) {
-            setOpenFolders(new Set([data[0].client_name]));
-          }
         }
       })
       .catch(() => {/* silently ignore in sidebar */});

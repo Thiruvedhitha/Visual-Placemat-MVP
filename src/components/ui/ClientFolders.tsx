@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { ClientFolder, ClientCatalog } from "@/app/api/clients/route";
+import type { ClientFolder, ClientCatalog, RecentCommit } from "@/app/api/clients/route";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -14,8 +14,11 @@ function timeAgo(iso: string): string {
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
-  if (days < 30) return `${days}d ago`;
-  return `${Math.floor(days / 30)}mo ago`;
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks} wk${weeks > 1 ? "s" : ""} ago`;
+  const months = Math.floor(days / 30);
+  return `${months} mo${months > 1 ? "s" : ""} ago`;
 }
 
 const CLIENT_ACCENT: string[] = [
@@ -32,46 +35,104 @@ const CLIENT_ACCENT: string[] = [
 // ── DiagramRow ────────────────────────────────────────────────────────────────
 
 function DiagramRow({ cat }: { cat: ClientCatalog }) {
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const commits = cat.recent_commits ?? [];
+
   return (
-    <Link
-      href={`/dashboard?catalogId=${encodeURIComponent(cat.id)}`}
-      className="group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all hover:bg-slate-50"
-    >
-      {/* Diagram icon */}
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-400 transition group-hover:bg-brand-50 group-hover:text-brand-500">
-        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0112 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375z" />
-        </svg>
-      </span>
-
-      {/* Name + meta */}
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-slate-800 group-hover:text-brand-700">
-          {cat.name}
-        </p>
-        <div className="mt-0.5 flex items-center gap-2">
-          {cat.industry && (
-            <span className="rounded-full bg-slate-100 px-1.5 py-px text-[10px] font-medium text-slate-500">
-              {cat.industry}
-            </span>
-          )}
-          <span className="text-[10px] text-slate-400">
-            {cat.capability_count} capabilities
+    <div>
+      <div className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all hover:bg-slate-50">
+        {/* History toggle */}
+        {commits.length > 0 ? (
+          <button
+            onClick={(e) => { e.preventDefault(); setHistoryOpen((v) => !v); }}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-400 transition hover:bg-slate-200"
+          >
+            <svg
+              className={`h-3.5 w-3.5 transition-transform duration-200 ${historyOpen ? "rotate-90" : ""}`}
+              fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            </svg>
+          </button>
+        ) : (
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-400">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0112 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375z" />
+            </svg>
           </span>
-        </div>
+        )}
+
+        {/* Name + meta — clicking goes to dashboard */}
+        <Link
+          href={`/dashboard?catalogId=${encodeURIComponent(cat.id)}`}
+          className="group flex min-w-0 flex-1 items-center gap-3"
+        >
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-slate-800 group-hover:text-brand-700">
+              {cat.name}
+            </p>
+            <div className="mt-0.5 flex items-center gap-2">
+              {cat.industry && (
+                <span className="rounded-full bg-slate-100 px-1.5 py-px text-[10px] font-medium text-slate-500">
+                  {cat.industry}
+                </span>
+              )}
+              <span className="text-[10px] text-slate-400">
+                {cat.capability_count} capabilities
+              </span>
+              {commits.length > 0 && (
+                <span className="text-[10px] text-slate-400">
+                  · {commits.length} change{commits.length !== 1 ? "s" : ""}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Time + arrow */}
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="text-[10px] text-slate-400">{timeAgo(cat.updated_at)}</span>
+            <svg
+              className="h-3.5 w-3.5 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-brand-400"
+              fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            </svg>
+          </div>
+        </Link>
       </div>
 
-      {/* Time + arrow */}
-      <div className="flex shrink-0 items-center gap-2">
-        <span className="text-[10px] text-slate-400">{timeAgo(cat.updated_at)}</span>
-        <svg
-          className="h-3.5 w-3.5 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-brand-400"
-          fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-        </svg>
-      </div>
-    </Link>
+      {/* Expandable commit history — VS Code source-control style */}
+      {historyOpen && commits.length > 0 && (
+        <div className="ml-[44px] border-l-2 border-slate-200 pl-4 pb-2">
+          {commits.map((c, idx) => {
+            const statParts: string[] = [];
+            if (c.adds > 0) statParts.push(`+${c.adds}`);
+            if (c.deletes > 0) statParts.push(`-${c.deletes}`);
+            if (c.renames > 0) statParts.push(`~${c.renames}`);
+            if (c.styles > 0) statParts.push(`◉${c.styles}`);
+            return (
+              <div key={idx} className="py-1.5">
+                <div className="flex items-start gap-2">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+                  <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-slate-700">{c.summary}</p>
+                </div>
+                <div className="ml-[14px] flex items-center gap-2 mt-0.5">
+                  {statParts.length > 0 && (
+                    <span className="text-[10px] font-semibold">
+                      {c.adds > 0 && <span className="text-emerald-600">+{c.adds} </span>}
+                      {c.deletes > 0 && <span className="text-red-500">-{c.deletes} </span>}
+                      {c.renames > 0 && <span className="text-amber-600">~{c.renames} </span>}
+                      {c.styles > 0 && <span className="text-violet-500">◉{c.styles}</span>}
+                    </span>
+                  )}
+                  <span className="text-[10px] text-slate-400">· {timeAgo(c.ts)}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -136,47 +197,59 @@ function ClientAccordion({
 // ── MyDiagramsSection ─────────────────────────────────────────────────────────
 
 function MyDiagramsSection({ catalogs }: { catalogs: ClientCatalog[] }) {
+  const [open, setOpen] = useState(false);
+
   return (
     <div className="mb-10">
-      {/* Section header */}
-      <div className="mb-4 flex items-center gap-2">
-        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-600 text-white">
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
+        {/* Collapsible header */}
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-center gap-3 px-4 py-3.5 text-left"
+        >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-white">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+            </svg>
+          </span>
+          <span className="flex-1 truncate text-sm font-semibold text-slate-700">My Diagrams</span>
+          <span className="shrink-0 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold text-brand-600">
+            {catalogs.length}
+          </span>
+          <svg
+            className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+            fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
           </svg>
-        </span>
-        <h2 className="text-base font-bold text-slate-800">My Diagrams</h2>
-        <span className="ml-1 rounded-full bg-brand-50 px-2 py-0.5 text-xs font-semibold text-brand-600">
-          {catalogs.length}
-        </span>
-      </div>
+        </button>
 
-      {catalogs.length === 0 ? (
-        <div className="flex items-center gap-3 rounded-xl border border-dashed border-slate-200 px-5 py-6">
-          <svg className="h-8 w-8 shrink-0 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-          </svg>
-          <div>
-            <p className="text-sm font-medium text-slate-500">No personal diagrams yet</p>
-            <p className="mt-0.5 text-xs text-slate-400">
-              Upload a file or start with an AI prompt to create one.
-            </p>
-          </div>
-          <Link href="/documents" className="ml-auto shrink-0 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-700">
-            Upload
-          </Link>
-        </div>
-      ) : (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="divide-y divide-slate-100">
-            {catalogs.map((cat) => (
-              <div key={cat.id} className="px-1">
-                <DiagramRow cat={cat} />
+        {/* Collapsible content */}
+        {open && (
+          catalogs.length === 0 ? (
+            <div className="flex items-center gap-3 border-t border-slate-100 px-5 py-6">
+              <svg className="h-8 w-8 shrink-0 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+              </svg>
+              <div>
+                <p className="text-sm font-medium text-slate-500">No personal diagrams yet</p>
+                <p className="mt-0.5 text-xs text-slate-400">
+                  Upload a file or start with an AI prompt to create one.
+                </p>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+              <Link href="/documents" className="ml-auto shrink-0 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-700">
+                Upload
+              </Link>
+            </div>
+          ) : (
+            <div className="border-t border-slate-100 px-1 py-1">
+              {catalogs.map((cat) => (
+                <DiagramRow key={cat.id} cat={cat} />
+              ))}
+            </div>
+          )
+        )}
+      </div>
     </div>
   );
 }
@@ -254,7 +327,7 @@ export default function ClientFolders() {
                 key={folder.client_name}
                 folder={folder}
                 accentColor={CLIENT_ACCENT[idx % CLIENT_ACCENT.length]}
-                defaultOpen={idx === 0}
+                defaultOpen={false}
               />
             ))}
           </div>
