@@ -68,10 +68,10 @@ export interface AIMapEditorProps {
 
 // ── Supabase chat helpers ────────────────────────────────────────────────────
 
-async function loadHistoryFromDB(catalogId: string | null, scope: Scope): Promise<ChatMessage[]> {
+async function loadHistoryFromDB(catalogId: string | null): Promise<ChatMessage[]> {
   if (!catalogId) return []; // Not saved to DB yet
   try {
-    const res = await fetch(`/api/chat?catalogId=${catalogId}&scope=${scope}`);
+    const res = await fetch(`/api/chat?catalogId=${catalogId}`);
     if (!res.ok) return [];
     const data = await res.json();
     return (data.messages ?? []).map((m: { role: string; text: string }) => ({
@@ -83,7 +83,7 @@ async function loadHistoryFromDB(catalogId: string | null, scope: Scope): Promis
   }
 }
 
-async function saveMessagesToDB(catalogId: string | null, scope: Scope, msgs: { role: string; text: string }[]) {
+async function saveMessagesToDB(catalogId: string | null, msgs: { role: string; text: string }[]) {
   console.log("[chat] saveMessagesToDB called — catalogId:", catalogId, "msgs:", msgs.length);
   if (!catalogId) {
     console.log("[chat] Skipping save — no catalogId (catalog not yet saved to DB)");
@@ -93,7 +93,7 @@ async function saveMessagesToDB(catalogId: string | null, scope: Scope, msgs: { 
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ catalogId, scope, messages: msgs }),
+      body: JSON.stringify({ catalogId, messages: msgs }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -106,10 +106,10 @@ async function saveMessagesToDB(catalogId: string | null, scope: Scope, msgs: { 
   }
 }
 
-async function clearHistoryFromDB(catalogId: string | null, scope: Scope) {
+async function clearHistoryFromDB(catalogId: string | null) {
   if (!catalogId) return;
   try {
-    await fetch(`/api/chat?catalogId=${catalogId}&scope=${scope}`, { method: "DELETE" });
+    await fetch(`/api/chat?catalogId=${catalogId}`, { method: "DELETE" });
   } catch {
     // silently skip
   }
@@ -162,7 +162,7 @@ export default function AIMapEditor({
       const prev = prevCatalogIdRef.current;
       const isFirstSave = !prev && catalogId;
       if (!isFirstSave) {
-        loadHistoryFromDB(catalogId, scope).then(setMessages);
+        loadHistoryFromDB(catalogId).then(setMessages);
         setProposalStates({});
         setActiveForm(null);
       }
@@ -177,7 +177,7 @@ export default function AIMapEditor({
     if (!prev && catalogId && !flushedRef.current && messages.length > 0) {
       flushedRef.current = true;
       const allMsgs = messages.map((m) => ({ role: m.role, text: m.text }));
-      saveMessagesToDB(catalogId, scope, allMsgs);
+      saveMessagesToDB(catalogId, allMsgs);
     }
     prevCatalogIdRef.current = catalogId;
   }, [catalogId, messages, scope]);
@@ -195,7 +195,7 @@ export default function AIMapEditor({
   }, [scope]);
 
   const clearHistory = useCallback(() => {
-    clearHistoryFromDB(catalogId, scope);
+    clearHistoryFromDB(catalogId);
     setMessages([]);
     setProposalStates({});
     setActiveForm(null);
@@ -241,7 +241,7 @@ export default function AIMapEditor({
       const mode = explicitMode ?? (isInfoPrompt(trimmed) ? "chat" : isSuggestionPrompt(trimmed) ? "suggest" : "command");
 
       // Save user message to DB
-      saveMessagesToDB(catalogId, scope, [{ role: "user", text: trimmed }]);
+      saveMessagesToDB(catalogId, [{ role: "user", text: trimmed }]);
 
       try {
         // Build history — for proposal messages, include what was accepted/declined
@@ -280,14 +280,14 @@ export default function AIMapEditor({
             ? "⏳ AI rate limit reached. Please wait ~30 seconds and try again."
             : `Error: ${data.error || "Something went wrong."}`;
           setMessages((prev) => [...prev, { role: "ai", text: errText }]);
-          saveMessagesToDB(catalogId, scope, [{ role: "ai", text: errText }]);
+          saveMessagesToDB(catalogId, [{ role: "ai", text: errText }]);
           return;
         }
 
         if (mode === "chat") {
           const aiText = data.reply || "No information found.";
           setMessages((prev) => [...prev, { role: "ai", text: aiText }]);
-          saveMessagesToDB(catalogId, scope, [{ role: "ai", text: aiText }]);
+          saveMessagesToDB(catalogId, [{ role: "ai", text: aiText }]);
         } else if (mode === "suggest") {
           const proposals: Proposal[] = Array.isArray(data.proposals) ? data.proposals : [];
           const newMsg: ChatMessage = { role: "ai", text: data.summary || "Here are my suggestions:", proposals };
@@ -303,21 +303,21 @@ export default function AIMapEditor({
             }
             return next;
           });
-          saveMessagesToDB(catalogId, scope, [{ role: "ai", text: data.summary || "Here are my suggestions:" }]);
+          saveMessagesToDB(catalogId, [{ role: "ai", text: data.summary || "Here are my suggestions:" }]);
         } else {
           if (Array.isArray(data.commands) && data.commands.length > 0) {
             onAICommands(data.commands);
           }
           const aiText = data.summary || "Done.";
           setMessages((prev) => [...prev, { role: "ai", text: aiText }]);
-          saveMessagesToDB(catalogId, scope, [{ role: "ai", text: aiText }]);
+          saveMessagesToDB(catalogId, [{ role: "ai", text: aiText }]);
         }
       } catch (err) {
         const errText = err instanceof DOMException && err.name === "AbortError"
           ? "⏳ Request timed out — the AI is busy. Please wait a moment and try again."
           : "Network error. Please try again.";
         setMessages((prev) => [...prev, { role: "ai", text: errText }]);
-        saveMessagesToDB(catalogId, scope, [{ role: "ai", text: errText }]);
+        saveMessagesToDB(catalogId, [{ role: "ai", text: errText }]);
       } finally {
         setIsLoading(false);
       }
@@ -358,29 +358,7 @@ export default function AIMapEditor({
     setDeleteNodeId("");
   };
 
-  const ScopeToggle = (
-    <div className="border-b border-white/10 px-4 py-3">
-      <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-slate-500">Scope</p>
-      <div className="flex rounded-lg border border-white/15 bg-white/5 p-0.5">
-        <button
-          onClick={() => setScope("map")}
-          className={`flex-1 rounded-md py-1.5 text-xs font-medium transition ${
-            scope === "map" ? "bg-blue-500 text-white shadow" : "text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          Entire map
-        </button>
-        <button
-          onClick={() => setScope("node")}
-          className={`flex-1 rounded-md py-1.5 text-xs font-medium transition ${
-            scope === "node" ? "bg-blue-500 text-white shadow" : "text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          Single node
-        </button>
-      </div>
-    </div>
-  );
+  const ScopeToggle = null;
 
   const ChatSection = (
     <>
@@ -388,11 +366,6 @@ export default function AIMapEditor({
         {messages.length === 0 && scope === "map" && !activeForm && (
           <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-[13px] leading-relaxed text-slate-300">
             I have full context of your {capabilities.length}-node capability map. Ask me to restructure, find gaps, add nodes, rename sections, or analyse coverage.
-          </div>
-        )}
-        {messages.length === 0 && scope === "node" && targetNode && (
-          <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-[13px] leading-relaxed text-slate-300">
-            Ask me anything about <span className="font-medium text-white">&quot;{targetNode.name}&quot;</span> — rename it, suggest sub-capabilities, restyle, or restructure it.
           </div>
         )}
         {messages.map((msg, i) => (
