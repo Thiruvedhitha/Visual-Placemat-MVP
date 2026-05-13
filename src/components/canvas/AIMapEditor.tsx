@@ -66,7 +66,54 @@ export interface AIMapEditorProps {
   onPickNode?: (id: string) => void;
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+// ── Supabase chat helpers ────────────────────────────────────────────────────
+
+async function loadHistoryFromDB(catalogId: string | null, scope: Scope): Promise<ChatMessage[]> {
+  if (!catalogId) return []; // Not saved to DB yet
+  try {
+    const res = await fetch(`/api/chat?catalogId=${catalogId}&scope=${scope}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.messages ?? []).map((m: { role: string; text: string }) => ({
+      role: m.role as "user" | "ai",
+      text: m.text,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+async function saveMessagesToDB(catalogId: string | null, scope: Scope, msgs: { role: string; text: string }[]) {
+  console.log("[chat] saveMessagesToDB called — catalogId:", catalogId, "msgs:", msgs.length);
+  if (!catalogId) {
+    console.log("[chat] Skipping save — no catalogId (catalog not yet saved to DB)");
+    return;
+  }
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ catalogId, scope, messages: msgs }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error("[chat] Failed to save messages:", err);
+    } else {
+      console.log("[chat] Messages saved successfully");
+    }
+  } catch (e) {
+    console.error("[chat] Network error saving messages:", e);
+  }
+}
+
+async function clearHistoryFromDB(catalogId: string | null, scope: Scope) {
+  if (!catalogId) return;
+  try {
+    await fetch(`/api/chat?catalogId=${catalogId}&scope=${scope}`, { method: "DELETE" });
+  } catch {
+    // silently skip
+  }
+}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -98,18 +145,21 @@ export default function AIMapEditor({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Derive catalogId from the first capability (all share the same catalog)
-  const catalogId = capabilities[0]?.catalog_id ?? "default";
+  // Derive catalogId from Zustand store (real DB ID) or fallback to capability's catalog_id
+  const storeCatalogId = useCatalogStore((s) => s.catalogId);
+  const catalogId = storeCatalogId ?? capabilities[0]?.catalog_id ?? null;
 
-  // Reset chat when panel opens or scope changes — always start fresh
+  // Load persisted history from Supabase when the panel opens or the scope changes
   useEffect(() => {
     if (open) {
-      setMessages([]);
+      loadHistoryFromDB(catalogId, scope).then(setMessages);
       setProposalStates({});
       setActiveForm(null);
       setInputText("");
     }
   }, [open, scope, catalogId]);
+
+  // No longer auto-persist to localStorage — messages are saved per-turn via API
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -122,6 +172,7 @@ export default function AIMapEditor({
   }, [scope]);
 
   const clearHistory = useCallback(() => {
+    clearHistoryFromDB(catalogId, scope);
     setMessages([]);
     setProposalStates({});
     setActiveForm(null);
@@ -166,6 +217,9 @@ export default function AIMapEditor({
 
       const mode = explicitMode ?? (isInfoPrompt(trimmed) ? "chat" : isSuggestionPrompt(trimmed) ? "suggest" : "command");
 
+      // Save user message to DB
+      saveMessagesToDB(catalogId, scope, [{ role: "user", text: trimmed }]);
+
       try {
         // Build history — for proposal messages, include what was accepted/declined
         const history = messages.flatMap((m, idx) => {
@@ -192,12 +246,16 @@ export default function AIMapEditor({
         });
         const data = await res.json();
         if (!res.ok) {
-          setMessages((prev) => [...prev, { role: "ai", text: `Error: ${data.error || "Something went wrong."}` }]);
+          const errText = `Error: ${data.error || "Something went wrong."}`;
+          setMessages((prev) => [...prev, { role: "ai", text: errText }]);
+          saveMessagesToDB(catalogId, scope, [{ role: "ai", text: errText }]);
           return;
         }
 
         if (mode === "chat") {
-          setMessages((prev) => [...prev, { role: "ai", text: data.reply || "No information found." }]);
+          const aiText = data.reply || "No information found.";
+          setMessages((prev) => [...prev, { role: "ai", text: aiText }]);
+          saveMessagesToDB(catalogId, scope, [{ role: "ai", text: aiText }]);
         } else if (mode === "suggest") {
           const proposals: Proposal[] = Array.isArray(data.proposals) ? data.proposals : [];
           const newMsg: ChatMessage = { role: "ai", text: data.summary || "Here are my suggestions:", proposals };
@@ -213,14 +271,19 @@ export default function AIMapEditor({
             }
             return next;
           });
+          saveMessagesToDB(catalogId, scope, [{ role: "ai", text: data.summary || "Here are my suggestions:" }]);
         } else {
           if (Array.isArray(data.commands) && data.commands.length > 0) {
             onAICommands(data.commands);
           }
-          setMessages((prev) => [...prev, { role: "ai", text: data.summary || "Done." }]);
+          const aiText = data.summary || "Done.";
+          setMessages((prev) => [...prev, { role: "ai", text: aiText }]);
+          saveMessagesToDB(catalogId, scope, [{ role: "ai", text: aiText }]);
         }
       } catch {
-        setMessages((prev) => [...prev, { role: "ai", text: "Network error. Please try again." }]);
+        const errText = "Network error. Please try again.";
+        setMessages((prev) => [...prev, { role: "ai", text: errText }]);
+        saveMessagesToDB(catalogId, scope, [{ role: "ai", text: errText }]);
       } finally {
         setIsLoading(false);
       }

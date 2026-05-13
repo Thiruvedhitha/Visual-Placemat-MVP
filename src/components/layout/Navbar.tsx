@@ -66,7 +66,7 @@ export default function Navbar() {
               Home
             </Link>
             <Link
-              href="/dashboard"
+              href="/works"
               className="rounded-full px-3.5 py-1 text-sm font-medium text-slate-300 hover:bg-white/10 hover:text-white"
             >
               My Works

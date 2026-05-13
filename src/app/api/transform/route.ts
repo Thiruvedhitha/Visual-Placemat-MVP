@@ -26,7 +26,20 @@ function trimCapabilities(caps: Capability[], fullPrompt: string): Capability[] 
   // Strip the [Context: ...] prefix injected by RightSidebar so the selected
   // node's name doesn't pollute the keyword matching
   const userRequest = fullPrompt.replace(/^\[Context:[^\]]*\]\s*/i, "").trim();
-  const words = userRequest.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+  const lower = userRequest.toLowerCase();
+  const words = lower.split(/\s+/).filter((w) => w.length > 3);
+
+  // If user explicitly references a level (L0, L1, L2, L3), include ALL nodes at that level
+  // plus all ancestor levels so the tree structure stays intact for the AI
+  const mentionedLevels = new Set<number>();
+  for (const m of lower.matchAll(/\bl([0-3])\b/g)) {
+    mentionedLevels.add(Number(m[1]));
+  }
+  if (mentionedLevels.size > 0) {
+    // Compute the max mentioned level and include everything up to it
+    const maxLevel = Math.max(...mentionedLevels);
+    return caps.filter((c) => c.level <= maxLevel);
+  }
 
   const l0l1 = caps.filter((c) => c.level <= 1);
   const l2 = caps.filter((c) => c.level === 2);
