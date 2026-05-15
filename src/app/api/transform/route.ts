@@ -1,8 +1,35 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import fs from "fs";
+import path from "path";
 import { buildCommandPrompt, buildSuggestionPrompt, buildChatPrompt } from "@/lib/commands/promptBuilder";
 import type { TransformRequest, DiagramCommand, ChatHistoryMessage } from "@/lib/commands/index";
 import type { Capability } from "@/types/capability";
+
+// ── Usage logging ──────────────────────────────────────────────────────────
+const USAGE_LOG_PATH = path.join(process.cwd(), "usage-log.json");
+
+function appendUsageLog(entry: {
+  timestamp: string;
+  model: string;
+  mode: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+}) {
+  try {
+    let log: typeof entry[] = [];
+    if (fs.existsSync(USAGE_LOG_PATH)) {
+      const raw = fs.readFileSync(USAGE_LOG_PATH, "utf-8");
+      log = JSON.parse(raw);
+    }
+    log.push(entry);
+    fs.writeFileSync(USAGE_LOG_PATH, JSON.stringify(log, null, 2));
+  } catch (e) {
+    console.warn("[Usage Log] Failed to write:", e);
+  }
+}
 
 export async function GET() {
   return NextResponse.json(
@@ -12,12 +39,32 @@ export async function GET() {
 }
 
 /**
+ * Computes the canonical hierarchical number for a capability (e.g. "1.7.5.1")
+ * using sort_order — must stay in sync with promptBuilder.getNumber and the canvas.
+ */
+function getCapabilityNumber(capId: string, caps: Capability[]): string {
+  const byId = new Map(caps.map((c) => [c.id, c]));
+  const path: number[] = [];
+  let current = byId.get(capId);
+  while (current) {
+    const parentId = current.parent_id ?? null;
+    const siblings = caps.filter((c) => (c.parent_id ?? null) === parentId);
+    siblings.sort((a, b) => a.sort_order - b.sort_order);
+    path.unshift(siblings.findIndex((c) => c.id === current!.id) + 1);
+    current = current.parent_id ? byId.get(current.parent_id) : undefined;
+  }
+  return path.join(".");
+}
+
+/**
  * Trims the capability list to only what the AI needs.
  * Uses the PURE user request (strips any [Context:...] prefix added by the
  * sidebar) so the selected node never biases which nodes are included.
  *
  * Strategy:
  * - Always send all L0 + L1 (structure overview)
+ * - If the prompt contains hierarchical numbers (e.g. 1.6.1.1), resolve those
+ *   nodes and force-include them plus all their ancestors and siblings
  * - L2: only nodes whose name matches a keyword from the user's request
  * - L3: only direct children of matched L2s  (no sibling expansion — saves tokens)
  * - Fallback: if no L2 matched, send all L2 but NO L3
@@ -29,6 +76,11 @@ function trimCapabilities(caps: Capability[], fullPrompt: string): Capability[] 
   const lower = userRequest.toLowerCase();
   const words = lower.split(/\s+/).filter((w) => w.length > 3);
 
+  // Extract the canvas-selected node ID injected by AIMapEditor buildPrompt.
+  // This node must ALWAYS be included in the trimmed set regardless of keywords.
+  const canvasSelectedMatch = fullPrompt.match(/id\s+"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/i);
+  const canvasSelectedId = canvasSelectedMatch ? canvasSelectedMatch[1] : null;
+
   // If user explicitly references a level (L0, L1, L2, L3), include ALL nodes at that level
   // plus all ancestor levels so the tree structure stays intact for the AI
   const mentionedLevels = new Set<number>();
@@ -39,6 +91,38 @@ function trimCapabilities(caps: Capability[], fullPrompt: string): Capability[] 
     // Compute the max mentioned level and include everything up to it
     const maxLevel = Math.max(...mentionedLevels);
     return caps.filter((c) => c.level <= maxLevel);
+  }
+
+  // Detect hierarchical number references in the prompt (e.g. "1.6.1.1", "2.3")
+  const numberRefs = [...lower.matchAll(/\b(\d+(?:\.\d+){1,3})\b/g)].map((m) => m[1]);
+  if (numberRefs.length > 0) {
+    // Build number→id map for all caps (computed once)
+    const numberMap = new Map<string, string>();
+    for (const cap of caps) {
+      numberMap.set(getCapabilityNumber(cap.id, caps), cap.id);
+    }
+    const byId = new Map(caps.map((c) => [c.id, c]));
+
+    // Collect the directly referenced nodes plus all ancestors
+    const forceIncludeIds = new Set<string>();
+    for (const ref of numberRefs) {
+      const id = numberMap.get(ref);
+      if (!id) continue;
+      // Walk up to root, adding every ancestor
+      let cur = byId.get(id);
+      while (cur) {
+        forceIncludeIds.add(cur.id);
+        cur = cur.parent_id ? byId.get(cur.parent_id) : undefined;
+      }
+      // Also include direct children so the AI can see the node's contents
+      caps.filter((c) => c.parent_id === id).forEach((c) => forceIncludeIds.add(c.id));
+    }
+
+    if (forceIncludeIds.size > 0) {
+      // Always include all L0+L1, plus the resolved nodes/ancestors/children
+      const base = new Set(caps.filter((c) => c.level <= 1).map((c) => c.id));
+      return caps.filter((c) => base.has(c.id) || forceIncludeIds.has(c.id));
+    }
   }
 
   const l0l1 = caps.filter((c) => c.level <= 1);
@@ -67,14 +151,28 @@ function trimCapabilities(caps: Capability[], fullPrompt: string): Capability[] 
     matchedL2Ids.size > 0 ? l2.filter((c) => matchedL2Ids.has(c.id)) : l2;
   const finalL3 = matchedL2Ids.size > 0 ? relevantL3 : [];
 
-  return [...l0l1, ...relevantL2, ...finalL3];
+  const trimmed = [...l0l1, ...relevantL2, ...finalL3];
+
+  // Always include the canvas-selected node plus its siblings (so the AI can
+  // see it in context) regardless of keyword matching.
+  if (canvasSelectedId && !trimmed.find((c) => c.id === canvasSelectedId)) {
+    const selectedCap = caps.find((c) => c.id === canvasSelectedId);
+    if (selectedCap) {
+      // Add the node itself and its siblings (same parent) for context
+      const siblings = caps.filter((c) => c.parent_id === selectedCap.parent_id);
+      const idsAlready = new Set(trimmed.map((c) => c.id));
+      siblings.forEach((s) => { if (!idsAlready.has(s.id)) trimmed.push(s); });
+    }
+  }
+
+  return trimmed;
 }
 
 export async function POST(req: Request) {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
-      { error: "GEMINI_API_KEY is not configured on the server" },
+      { error: "OPENAI_API_KEY is not configured on the server" },
       { status: 500 }
     );
   }
@@ -86,7 +184,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { prompt, capabilities, nodeStyles = {}, history = [], mode = "command" } = body;
+  const { prompt, capabilities, nodeStyles = {}, history = [], mode = "command", legend } = body;
 
   if (!prompt || typeof prompt !== "string" || prompt.trim() === "") {
     return NextResponse.json({ error: "prompt is required" }, { status: 400 });
@@ -98,10 +196,10 @@ export async function POST(req: Request) {
   // For chat mode send all capabilities (don't trim — user may ask about any node)
   const trimmed = mode === "chat" ? capabilities : trimCapabilities(capabilities, prompt);
   const systemPrompt = mode === "suggest"
-    ? buildSuggestionPrompt(trimmed, nodeStyles)
+    ? buildSuggestionPrompt(trimmed, nodeStyles, capabilities)
     : mode === "chat"
-    ? buildChatPrompt(trimmed, nodeStyles)
-    : buildCommandPrompt(trimmed, nodeStyles);
+    ? buildChatPrompt(trimmed, nodeStyles, capabilities)
+    : buildCommandPrompt(trimmed, nodeStyles, capabilities, legend);
 
   // ── Request log ──────────────────────────────────────────────────────────────
   console.log("\n[AI Transform] ── Incoming request ──────────────────────");
@@ -118,14 +216,13 @@ export async function POST(req: Request) {
     content: m.content,
   }));
 
-  const gemini = new OpenAI({
+  const openai = new OpenAI({
     apiKey,
-    baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
   });
 
-  const callGemini = async () =>
-    gemini.chat.completions.create({
-      model: "gemini-2.5-flash-lite",
+  const callOpenAI = async () =>
+    openai.chat.completions.create({
+      model: "gpt-4.1-mini",
       max_tokens: 8192,
       // chat mode returns plain text — don't force JSON
       ...(mode !== "chat" ? { response_format: { type: "json_object" as const } } : {}),
@@ -136,20 +233,19 @@ export async function POST(req: Request) {
       ],
     });
 
-  // Exponential backoff: retry up to 3 times on 429 (15s → 30s → 60s)
-  // Gemini free tier is 15 RPM — need to wait at least one full minute
-  const callGeminiWithRetry = async () => {
-    const delays = [15000, 30000, 60000];
+  // Exponential backoff: retry up to 3 times on 429 (5s → 10s → 20s)
+  const callOpenAIWithRetry = async () => {
+    const delays = [5000, 10000, 20000];
     let lastErr: unknown;
     for (let attempt = 0; attempt <= delays.length; attempt++) {
       try {
-        return await callGemini();
+        return await callOpenAI();
       } catch (err: unknown) {
         lastErr = err;
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("429") && attempt < delays.length) {
           const wait = delays[attempt];
-          console.warn(`[AI Transform] 429 rate limit — retrying in ${wait / 1000}s… (attempt ${attempt + 1}/${delays.length})`);
+          console.warn(`[AI Transform] 429 rate-limit — retrying in ${wait / 1000}s… (attempt ${attempt + 1}/${delays.length})`);
           await new Promise((r) => setTimeout(r, wait));
         } else {
           throw err;
@@ -163,12 +259,34 @@ export async function POST(req: Request) {
   try {
     let response;
     try {
-      response = await callGeminiWithRetry();
+      response = await callOpenAIWithRetry();
     } catch (firstErr: unknown) {
       throw firstErr;
     }
 
     const content = response.choices[0]?.message?.content ?? "{}";
+
+    // ── Usage logging ─────────────────────────────────────────────────────
+    if (response.usage) {
+      const { prompt_tokens, completion_tokens, total_tokens } = response.usage;
+      // gpt-4.1-mini pricing: $0.40/1M input, $1.60/1M output
+      const cost_usd =
+        (prompt_tokens / 1_000_000) * 0.4 +
+        (completion_tokens / 1_000_000) * 1.6;
+      const entry = {
+        timestamp: new Date().toISOString(),
+        model: "gpt-4.1-mini",
+        mode: mode ?? "transform",
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        cost_usd: parseFloat(cost_usd.toFixed(6)),
+      };
+      appendUsageLog(entry);
+      console.log(
+        `[AI Transform] tokens → prompt:${prompt_tokens} completion:${completion_tokens} total:${total_tokens} cost:$${cost_usd.toFixed(5)}`
+      );
+    }
 
     // ── Raw response log ─────────────────────────────────────────────────────
     console.log("[AI Transform] ── Raw response ───────────────────────────");
@@ -202,8 +320,8 @@ export async function POST(req: Request) {
       }
     }
   } catch (err: unknown) {
-    const raw = err instanceof Error ? err.message : "Gemini API error";
-    // Log the full error object so we can see the real Gemini response body
+    const raw = err instanceof Error ? err.message : "OpenAI API error";
+    // Log the full error object so we can see the real OpenAI response body
     console.error("[AI Transform] ── ERROR ──────────────────────────────────");
     console.error("  Message:", raw);
     if (err && typeof err === "object" && "status" in err) {
@@ -215,7 +333,7 @@ export async function POST(req: Request) {
     console.error("─────────────────────────────────────────────────────────\n");
 
     const userMsg = raw.includes("429")
-      ? "Gemini rate limit reached — please wait a few seconds and try again"
+      ? "OpenAI rate limit reached — please wait a few seconds and try again"
       : raw;
     return NextResponse.json({ error: userMsg }, { status: 502 });
   }

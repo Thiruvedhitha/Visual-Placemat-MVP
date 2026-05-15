@@ -65,6 +65,82 @@ function timeAgo(iso: string): string {
   return `${months} mo${months > 1 ? "s" : ""} ago`;
 }
 
+// ── Legend command reference panel ───────────────────────────────────────────
+
+const LEGEND_CMD_GROUPS = [
+  {
+    slot: "fill" as const,
+    label: "Background (fill) categories",
+    color: "text-emerald-400",
+    borderColor: "border-emerald-500/20",
+    bgColor: "bg-emerald-500/5",
+    commands: [
+      { op: "Create", phrase: 'mark as [label] with [color]', example: 'mark as "We have" with green' },
+      { op: "Modify", phrase: 'rename [old] to [new] / change colour of [label] to [color]', example: 'rename "client category" to "Already available"' },
+      { op: "Delete", phrase: 'remove the [label] category', example: 'delete the "Maybe" category' },
+    ],
+  },
+  {
+    slot: "border" as const,
+    label: "Border categories",
+    color: "text-violet-400",
+    borderColor: "border-violet-500/20",
+    bgColor: "bg-violet-500/5",
+    commands: [
+      { op: "Create", phrase: 'add border category [label] with [color]', example: 'add border "In progress" with orange' },
+      { op: "Modify", phrase: 'change [label] border colour to [color]', example: 'change "Blocked" border to red' },
+      { op: "Delete", phrase: 'remove border category [label]', example: 'remove border category "Apptio Tool"' },
+    ],
+  },
+];
+
+function LegendCommandRef() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex-shrink-0 border-b border-white/10">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between px-4 py-2 text-[10px] font-semibold uppercase tracking-widest text-slate-500 transition hover:text-slate-300"
+      >
+        <span className="flex items-center gap-1.5">
+          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+          </svg>
+          Legend commands
+        </span>
+        <svg
+          className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <div className="space-y-2.5 px-4 pb-3">
+          {LEGEND_CMD_GROUPS.map((group) => (
+            <div key={group.slot} className={`rounded-lg border ${group.borderColor} ${group.bgColor} p-2.5 space-y-1.5`}>
+              <p className={`text-[10px] font-semibold uppercase tracking-wider ${group.color}`}>{group.label}</p>
+              {group.commands.map((cmd) => (
+                <div key={cmd.op} className="space-y-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                      cmd.op === "Create" ? "bg-emerald-500/20 text-emerald-300" :
+                      cmd.op === "Modify" ? "bg-amber-500/20 text-amber-300" :
+                      "bg-red-500/20 text-red-300"
+                    }`}>{cmd.op}</span>
+                    <span className="text-[10px] text-slate-400 italic">{cmd.phrase}</span>
+                  </div>
+                  <p className="pl-8 text-[9px] text-slate-600">e.g. "{cmd.example}"</p>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 export interface AIMapEditorProps {
@@ -76,7 +152,7 @@ export interface AIMapEditorProps {
   onEnterPickMode: () => void;
   onExitPickMode: () => void;
   pickMode: boolean;
-  onAICommands: (commands: DiagramCommand[]) => void;
+  onAICommands: (commands: DiagramCommand[]) => string[];
   onUpdateNode?: (id: string, patch: Partial<CapabilityNodeData & NodeStylePatch>) => void;
   onPickNode?: (id: string) => void;
 }
@@ -396,9 +472,17 @@ export default function AIMapEditor({
           parentCap ? `, under "${parentCap.name}"` : ""
         }]\n\n${userText}`;
       }
+      // In map scope, if a node is selected on the canvas inject it so the AI
+      // can resolve "it", "this", "the selected node" to the exact ID.
+      if (scope === "map" && selectedNodeId) {
+        const sel = capabilities.find((c) => c.id === selectedNodeId);
+        if (sel) {
+          return `[CANVAS SELECTION — the user currently has this node selected on the canvas:\n  name: "${sel.name}" | level: L${sel.level} | id: ${sel.id}\n  When the user says "it", "this", "the selected node", or refers to a node without naming it, they mean THIS node. Always use id "${sel.id}" — never guess by name alone.]\n\n${userText}`;
+        }
+      }
       return userText;
     },
-    [scope, targetNode, parentCap]
+    [scope, targetNode, parentCap, selectedNodeId, capabilities]
   );
 
   const sendMessage = useCallback(
@@ -437,22 +521,22 @@ export default function AIMapEditor({
         });
 
         const controller = new AbortController();
-        // Allow up to 3 minutes for rate-limit retries (15s + 30s + 60s + call time)
-        const timeoutId = setTimeout(() => controller.abort(), 180000);
+        // Allow up to 60 seconds for rate-limit retries (5s + 10s + 20s + call time)
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
 
         const res = await fetch("/api/transform", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
           // Always read capabilities from the store at call-time so renamed/added nodes are fresh
-          body: JSON.stringify({ prompt: buildPrompt(trimmed), capabilities: useCatalogStore.getState().capabilities, nodeStyles, history, mode }),
+          body: JSON.stringify({ prompt: buildPrompt(trimmed), capabilities: useCatalogStore.getState().capabilities, nodeStyles, history, mode, legend: useCatalogStore.getState().legend }),
         });
         clearTimeout(timeoutId);
         const data = await res.json();
         if (!res.ok) {
           const isRateLimit = data.error?.includes("rate limit");
           const errText = isRateLimit
-            ? "⏳ AI rate limit reached. Please wait ~30 seconds and try again."
+            ? "⏳ AI rate limit reached. Please wait a moment and try again."
             : `Error: ${data.error || "Something went wrong."}`;
           setMessages((prev) => [...prev, { role: "ai", text: errText, ts: new Date().toISOString() }]);
           saveMessagesToDB(catalogId, [{ role: "ai", text: errText }]);
@@ -481,7 +565,7 @@ export default function AIMapEditor({
           saveMessagesToDB(catalogId, [{ role: "ai", text: data.summary || "Here are my suggestions:" }]);
         } else {
           if (Array.isArray(data.commands) && data.commands.length > 0) {
-            onAICommands(data.commands);
+            const execErrors = onAICommands(data.commands);
             // Record commit
             const stats = summarizeCommands(data.commands);
             const commit: CommitEntry = {
@@ -492,6 +576,12 @@ export default function AIMapEditor({
             };
             setCommits((prev) => [...prev, commit]);
             saveCommitToDB(catalogId, commit);
+            if (execErrors.length > 0) {
+              const errText = `⚠️ Some commands could not be applied:\n${execErrors.map((e) => `• ${e}`).join("\n")}`;
+              setMessages((prev) => [...prev, { role: "ai", text: errText, ts: new Date().toISOString() }]);
+              saveMessagesToDB(catalogId, [{ role: "ai", text: errText }]);
+              return;
+            }
           }
           const aiText = data.summary || "Done.";
           setMessages((prev) => [...prev, { role: "ai", text: aiText, ts: new Date().toISOString() }]);
@@ -1063,6 +1153,9 @@ export default function AIMapEditor({
               </button>
             ))}
           </div>
+
+          {/* Legend command reference — collapsible */}
+          <LegendCommandRef />
 
           {ChatSection}
         </>

@@ -1,0 +1,47 @@
+[
+  {
+    "timestamp": "2026-05-15T08:18:00.518Z",
+    "model": "gpt-4.1-mini",
+    "mode": "command",
+    "prompt_tokens": 3883,
+    "completion_tokens": 1494,
+    "total_tokens": 5377,
+    "cost_usd": 0.003944
+  },
+  {
+    "timestamp": "2026-05-15T08:19:26.846Z",
+    "model": "gpt-4.1-mini",
+    "mode": "command",
+    "prompt_tokens": 4308,
+    "completion_tokens": 649,
+    "total_tokens": 4957,
+    "cost_usd": 0.002762
+  },
+  {
+    "timestamp": "2026-05-15T08:23:27.685Z",
+    "model": "gpt-4.1-mini",
+    "mode": "command",
+    "prompt_tokens": 4516,
+    "completion_tokens": 2133,
+    "total_tokens": 6649,
+    "cost_usd": 0.005219
+  },
+  {
+    "timestamp": "2026-05-15T08:29:40.365Z",
+    "model": "gpt-4.1-mini",
+    "mode": "command",
+    "prompt_tokens": 2626,
+    "completion_tokens": 3096,
+    "total_tokens": 5722,
+    "cost_usd": 0.006004
+  },
+  {
+    "timestamp": "2026-05-15T08:31:29.536Z",
+    "model": "gpt-4.1-mini",
+    "mode": "command",
+    "prompt_tokens": 3475,
+    "completion_tokens": 3595,
+    "total_tokens": 7070,
+    "cost_usd": 0.007142
+  }
+]

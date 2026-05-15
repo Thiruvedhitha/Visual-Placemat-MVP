@@ -65,6 +65,46 @@ export type DiagramCommand =
       type: "SET_DESCRIPTION";
       nodeId: string;
       description: string;
+    }
+  /**
+   * Add or update a legend entry.
+   * The legend is shown in the left sidebar and helps users understand node colours.
+   * Use this when the user describes what a colour means (e.g. "we have", "not there").
+   */
+  | {
+      type: "SET_LEGEND";
+      /** "fill" = background colour legend; "border" = border colour legend */
+      slot: "fill" | "border";
+      /** Stable short ID for this entry, e.g. "we-have" or "in-progress" */
+      entryId: string;
+      /** Human-readable label shown in the legend, e.g. "We have" */
+      label: string;
+      /** Hex color code, e.g. "#22c55e" */
+      color: string;
+    }
+  /**
+   * Remove a legend entry by its entryId.
+   * Use when the user asks to delete or remove a legend category.
+   */
+  | {
+      type: "REMOVE_LEGEND";
+      /** "fill" or "border" slot the entry lives in */
+      slot: "fill" | "border";
+      /** entryId of the entry to remove */
+      entryId: string;
+    }
+  /**
+   * Reset a node's fill and/or border back to the level default (removes the override).
+   * Use when the user says "remove color", "reset", "clear color", "restore default".
+   * Omit fill/border flags to reset both; set only the one(s) to clear.
+   */
+  | {
+      type: "RESET_STYLE";
+      nodeId: string;
+      /** true = clear the fill override (restore level default bg) */
+      fill?: boolean;
+      /** true = clear the border override (restore level default border) */
+      border?: boolean;
     };
 
 /** Keyed by nodeId; merged into ReactFlow node.data on the canvas */
@@ -93,6 +133,8 @@ export interface TransformRequest {
    * "chat" — AI answers in plain text (listing, counting, describing nodes).
    */
   mode?: "command" | "suggest" | "chat";
+  /** Current legend configuration so the AI can reference existing categories */
+  legend?: { fill: Array<{ id: string; label: string; color: string }>; border: Array<{ id: string; label: string; color: string }> };
 }
 
 export interface TransformResponse {
