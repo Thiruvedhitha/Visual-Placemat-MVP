@@ -68,6 +68,7 @@ function DashboardContent() {
   // Canvas state
   const [nodes, setNodes] = useState<Node<CapabilityNodeData>[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
   const [visibleLevels, setVisibleLevels] = useState<Set<number>>(
     new Set([0, 1, 2, 3])
   );
@@ -143,22 +144,38 @@ function DashboardContent() {
   );
 
   const onNodeClick = useCallback(
-    (_: React.MouseEvent, node: Node<CapabilityNodeData>) => {
-      if (node.type === "capability") {
-        if (aiPickMode) {
-          // Single-node pick mode: target node inside AI panel only
-          setAiTargetNodeId(node.id);
-        } else if (!aiPanelOpen) {
-          // AI panel closed: open right sidebar normally
-          setSelectedNodeId(node.id);
-        }
-        // AI panel open in map mode: ignore click (keep sidebar closed)
+    (evt: React.MouseEvent, node: Node<CapabilityNodeData>) => {
+      if (node.type !== "capability") return;
+      if (aiPickMode) {
+        setAiTargetNodeId(node.id);
+        return;
+      }
+      if (aiPanelOpen) return; // AI panel open in map mode: ignore clicks
+
+      if (evt.ctrlKey) {
+        // Ctrl+click: toggle node in/out of multi-selection
+        setSelectedNodeIds((prev) => {
+          const next = new Set(prev);
+          if (next.has(node.id)) next.delete(node.id);
+          else next.add(node.id);
+          // Keep selectedNodeId as last single-selected node (for right sidebar)
+          if (next.size === 1) setSelectedNodeId([...next][0]);
+          else setSelectedNodeId(null);
+          return next;
+        });
+      } else {
+        // Plain click: single select
+        setSelectedNodeId(node.id);
+        setSelectedNodeIds(new Set([node.id]));
       }
     },
     [aiPickMode, aiPanelOpen]
   );
 
-  const onPaneClick = useCallback(() => setSelectedNodeId(null), []);
+  const onPaneClick = useCallback(() => {
+    setSelectedNodeId(null);
+    setSelectedNodeIds(new Set());
+  }, []);
 
   const onToggleLevel = useCallback((level: number) => {
     setVisibleLevels((prev) => {
@@ -179,21 +196,21 @@ function DashboardContent() {
 
     const nextNodes = buildCanvasNodes(capabilities, visibleLevels).map((node) => {
       const styles = nodeStyles[node.id];
-      const isSelected = node.id === selectedNodeId;
+      const isSelected = selectedNodeIds.has(node.id);
       const isAiTarget = node.id === aiTargetNodeId;
       const level = node.data.level;
       return {
         ...node,
         data: { ...node.data, ...styles, isSelected, pickMode: aiPickMode, isAiTarget },
         draggable: aiPickMode ? false : level >= 1,
-        selected: level === 3 ? isSelected : false,
+        selected: false, // ReactFlow selection disabled — we manage highlight via data.isSelected
         // In pick mode: flatten all z-index to 1 so every level is equally clickable
         zIndex: aiPickMode ? 1 : (level === 0 ? -1 : level === 1 ? 0 : level === 2 ? 1 : 1000),
       };
     });
 
     setNodes(nextNodes);
-  }, [capabilities, selectedNodeId, aiTargetNodeId, aiPickMode, visibleLevels, nodeStyles]);
+  }, [capabilities, selectedNodeIds, aiTargetNodeId, aiPickMode, visibleLevels, nodeStyles]);
 
   const onNodeDragStart: NodeDragHandler = useCallback((_, node) => {
     setSelectedNodeId(node.id);
@@ -504,6 +521,7 @@ function DashboardContent() {
           isDirty: true,
         });
         setSelectedNodeId(node.id);
+        setSelectedNodeIds(new Set([node.id]));
         setDragMessage("✅ " + result.message);
         setTimeout(() => setDragMessage(null), 3000);
       }
@@ -603,6 +621,7 @@ function DashboardContent() {
         return updated;
       });
       setSelectedNodeId(null);
+      setSelectedNodeIds(new Set());
     },
     []
   );
@@ -712,7 +731,7 @@ function DashboardContent() {
           <button
             onClick={() => {
               setAiPanelOpen((v) => {
-                if (!v) setSelectedNodeId(null); // opening AI panel: close right sidebar
+                if (!v) { setSelectedNodeId(null); setSelectedNodeIds(new Set()); } // opening AI panel: close right sidebar
                 return !v;
               });
             }}
@@ -841,6 +860,7 @@ function DashboardContent() {
               </div>
             )}
           </ReactFlow>
+
           {dragMessage && (
             <div className="absolute bottom-4 left-4 rounded-lg bg-blue-600 px-3 py-2 text-xs text-white shadow-lg">
               {dragMessage}
@@ -870,12 +890,11 @@ function DashboardContent() {
           />
         </div>
 
-        {/* Right sidebar — hidden when AI panel is open */}
-        {selectedNodeId && !aiPanelOpen && (
+        {/* Properties sidebar — single or multi-select */}
+        {selectedNodeIds.size >= 1 && !aiPanelOpen && (
           <div className="relative flex flex-shrink-0">
-            {/* Collapse arrow button */}
             <button
-              onClick={() => setSelectedNodeId(null)}
+              onClick={() => { setSelectedNodeId(null); setSelectedNodeIds(new Set()); }}
               title="Close sidebar"
               className="absolute -left-4 top-1/2 -translate-y-1/2 z-10 flex h-8 w-4 items-center justify-center rounded-l-md border border-r-0 border-slate-200 bg-white shadow-sm transition hover:bg-slate-100"
             >
@@ -883,20 +902,121 @@ function DashboardContent() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
               </svg>
             </button>
-            <RightSidebar
-              node={
-                selectedNode && selectedNode.type === "capability"
-                  ? { id: selectedNode.id, data: selectedNode.data as import("@/components/canvas/CapabilityNode").CapabilityNodeData }
-                  : null
-              }
-              capabilities={capabilities}
-              nodeStyles={nodeStyles}
-              onUpdateNode={onUpdateNode}
-              onReparent={onReparent}
-              onDetachChild={onDetachChild}
-              onDeleteChild={onDeleteNode}
-              onDeleteNode={onDeleteNode}
-            />
+
+            {/* Single-select: full RightSidebar */}
+            {selectedNodeIds.size === 1 && selectedNodeId && (
+              <RightSidebar
+                node={
+                  selectedNode && selectedNode.type === "capability"
+                    ? { id: selectedNode.id, data: selectedNode.data as import("@/components/canvas/CapabilityNode").CapabilityNodeData }
+                    : null
+                }
+                capabilities={capabilities}
+                nodeStyles={nodeStyles}
+                onUpdateNode={onUpdateNode}
+                onReparent={onReparent}
+                onDetachChild={onDetachChild}
+                onDeleteChild={onDeleteNode}
+                onDeleteNode={onDeleteNode}
+              />
+            )}
+
+            {/* Multi-select: shared properties panel */}
+            {selectedNodeIds.size > 1 && (
+              <div className="flex w-72 flex-col gap-5 overflow-y-auto border-l border-slate-200 bg-white p-5">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-slate-800">{selectedNodeIds.size} nodes selected</h2>
+                  <button
+                    onClick={() => { setSelectedNodeId(null); setSelectedNodeIds(new Set()); }}
+                    className="rounded p-1 text-slate-400 hover:text-slate-600"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </div>
+
+                {/* Background colour */}
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-500">Background colour</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      defaultValue="#ffffff"
+                      onChange={(e) => {
+                        const fill = e.target.value;
+                        setNodeStyles((prev) => {
+                          const next = { ...prev };
+                          selectedNodeIds.forEach((id) => { next[id] = { ...next[id], fill }; });
+                          return next;
+                        });
+                        useCatalogStore.setState({ isDirty: true });
+                      }}
+                      className="h-8 w-10 cursor-pointer rounded border border-slate-200 p-0.5"
+                    />
+                    <span className="text-xs text-slate-400">Apply to all selected</span>
+                  </div>
+                </div>
+
+                {/* Border colour */}
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-500">Border colour</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      defaultValue="#e2e8f0"
+                      onChange={(e) => {
+                        const border = e.target.value;
+                        setNodeStyles((prev) => {
+                          const next = { ...prev };
+                          selectedNodeIds.forEach((id) => { next[id] = { ...next[id], border }; });
+                          return next;
+                        });
+                        useCatalogStore.setState({ isDirty: true });
+                      }}
+                      className="h-8 w-10 cursor-pointer rounded border border-slate-200 p-0.5"
+                    />
+                    <span className="text-xs text-slate-400">Apply to all selected</span>
+                  </div>
+                </div>
+
+                {/* Parent */}
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-500">Move all under parent</label>
+                  <select
+                    defaultValue=""
+                    onChange={(e) => {
+                      const newParentId = e.target.value;
+                      if (!newParentId) return;
+                      selectedNodeIds.forEach((id) => onReparent(id, newParentId));
+                    }}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 shadow-sm focus:border-blue-400 focus:outline-none"
+                  >
+                    <option value="">— select a parent —</option>
+                    {capabilities
+                      .filter((c) => !selectedNodeIds.has(c.id) && c.level < 3)
+                      .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name))
+                      .map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {'\u00a0'.repeat(c.level * 2)}L{c.level} {c.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                {/* Delete all */}
+                <button
+                  onClick={() => {
+                    const cmds: DiagramCommand[] = [...selectedNodeIds].map((id) => ({ type: "DELETE_NODE" as const, nodeId: id }));
+                    applyAICommands(cmds);
+                    setSelectedNodeIds(new Set());
+                    setSelectedNodeId(null);
+                  }}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-100"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                  Delete all selected
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

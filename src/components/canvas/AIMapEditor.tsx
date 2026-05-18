@@ -602,10 +602,12 @@ export default function AIMapEditor({
                               onClick={() => {
                                 // Apply immediately on accept
                                 onAICommands([proposal.command]);
-                                setProposalStates((ps) => ({
-                                  ...ps,
-                                  [i]: { ...(ps[i] ?? {}), [proposal.id]: "accepted" },
-                                }));
+                                // Auto-decline all other pending proposals in this message
+                                // (e.g. only one rename can apply to the same node)
+                                const siblings = msg.proposals ?? [];
+                                const allDeclined: Record<string, "accepted" | "declined"> = {};
+                                siblings.forEach((p) => { allDeclined[p.id] = p.id === proposal.id ? "accepted" : "declined"; });
+                                setProposalStates((ps) => ({ ...ps, [i]: allDeclined }));
                                 // Record commit for accepted proposal
                                 const stats = summarizeCommands([proposal.command]);
                                 const commit: CommitEntry = {

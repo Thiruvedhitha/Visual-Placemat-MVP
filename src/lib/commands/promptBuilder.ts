@@ -109,7 +109,8 @@ Each proposal must contain exactly one command.
 
 ## Rules
 - Return at most 10 proposals.
-- Each proposal "description" must be ONE short sentence (max 12 words): just state the action, e.g. "Rename 'Ops' to 'Operations Management'" or "Move 'Billing' under 'Finance'".
+- If the user asks for "a name", "a suggestion", or anything phrased in the singular, return EXACTLY 1 proposal. Target the single most recently added or mentioned node. Never return multiple rename proposals for nodes sharing the same name.
+- Each proposal "description" must be ONE short sentence (max 12 words): always include the node level prefix, e.g. "Rename L2 'Ops' to 'Operations Management'" or "Move L3 'Billing' under 'Finance'".
 - The "summary" must be ONE short sentence (max 12 words) stating how many suggestions you have, e.g. "3 naming suggestions for clearer node labels".
 - Do NOT add explanations, rationale, or 'This provides...' / 'for better clarity' language.
 - Use hex colour codes (e.g. "#ff0000"). Never use CSS colour names.
