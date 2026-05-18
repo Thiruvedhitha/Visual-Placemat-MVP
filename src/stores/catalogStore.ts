@@ -5,6 +5,22 @@ import { persist } from "zustand/middleware";
 import type { Capability } from "@/types/capability";
 import type { NodeStylePatch } from "@/lib/commands/index";
 
+export interface LegendEntry {
+  id: string;
+  label: string;
+  color: string; // hex
+}
+
+export interface LegendConfig {
+  fill: LegendEntry[];
+  border: LegendEntry[];
+}
+
+const DEFAULT_LEGEND: LegendConfig = {
+  fill: [],
+  border: [],
+};
+
 export interface CatalogState {
   /** null = never saved to DB */
   catalogId: string | null;
@@ -14,6 +30,8 @@ export interface CatalogState {
   isDirty: boolean;
   /** Per-node visual overrides (fill, border) — keyed by node ID */
   nodeStyles: Record<string, NodeStylePatch>;
+  /** Color legend — fill and border category definitions */
+  legend: LegendConfig;
 }
 
 export interface CatalogActions {
@@ -47,6 +65,9 @@ export interface CatalogActions {
 
   /** Patch a single node's styles */
   patchNodeStyle: (id: string, patch: Partial<NodeStylePatch>) => void;
+
+  /** Replace the entire legend config */
+  setLegend: (legend: LegendConfig) => void;
 }
 
 const initialState: CatalogState = {
@@ -56,6 +77,7 @@ const initialState: CatalogState = {
   capabilities: [],
   isDirty: false,
   nodeStyles: {},
+  legend: DEFAULT_LEGEND,
 };
 
 export const useCatalogStore = create<CatalogState & CatalogActions>()(
@@ -107,9 +129,18 @@ export const useCatalogStore = create<CatalogState & CatalogActions>()(
             [id]: { ...state.nodeStyles[id], ...patch },
           },
           isDirty: true,
-        })),    }),
+        })),
+
+      setLegend: (legend) => set({ legend }),
+    }),
     {
       name: "visual-placemat-catalog",
+      version: 2,
+      migrate: (persisted: unknown) => {
+        // v1 → v2: clear pre-defined legend defaults so legend starts blank
+        const state = persisted as Partial<CatalogState>;
+        return { ...state, legend: DEFAULT_LEGEND };
+      },
     }
   )
 );

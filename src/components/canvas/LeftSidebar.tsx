@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import type { ClientFolder } from "@/app/api/clients/route";
+import { useCatalogStore } from "@/stores/catalogStore";
+import type { LegendEntry, LegendConfig } from "@/stores/catalogStore";
 
 const LAYERS = [
   { level: 0, label: "L0 — Domain", color: "#0f1b2d" },
@@ -20,6 +22,106 @@ const FOLDER_DOT_COLORS = [
   "bg-cyan-400",
 ];
 
+// ── LegendSection ─────────────────────────────────────────────────────────────
+function LegendSection({
+  title,
+  entries,
+  onUpdate,
+}: {
+  title: string;
+  entries: LegendEntry[];
+  onUpdate: (entries: LegendEntry[]) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [newLabel, setNewLabel] = useState("");
+  const [newColor, setNewColor] = useState("#94a3b8");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const addEntry = () => {
+    const label = newLabel.trim();
+    if (!label) return;
+    onUpdate([...entries, { id: `${Date.now()}`, label, color: newColor }]);
+    setNewLabel("");
+    setNewColor("#94a3b8");
+    setAdding(false);
+  };
+
+  const updateEntry = (id: string, patch: Partial<LegendEntry>) =>
+    onUpdate(entries.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+
+  const removeEntry = (id: string) =>
+    onUpdate(entries.filter((e) => e.id !== id));
+
+  return (
+    <div className="mb-3">
+      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{title}</p>
+      <ul className="space-y-1">
+        {entries.map((e) => (
+          <li key={e.id} className="group flex items-center gap-1.5">
+            {/* Color swatch (click to change color) */}
+            <label className="relative cursor-pointer">
+              <span
+                className="block h-3.5 w-3.5 flex-shrink-0 rounded-sm border border-slate-200"
+                style={{ background: e.color }}
+              />
+              <input
+                type="color"
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                value={e.color}
+                onChange={(ev) => updateEntry(e.id, { color: ev.target.value })}
+              />
+            </label>
+            {/* Label */}
+            <input
+              className="min-w-0 flex-1 bg-transparent text-[11px] text-slate-700 outline-none focus:underline"
+              value={e.label}
+              onChange={(ev) => updateEntry(e.id, { label: ev.target.value })}
+            />
+            {/* Remove */}
+            <button
+              onClick={() => removeEntry(e.id)}
+              className="hidden h-4 w-4 flex-shrink-0 items-center justify-center rounded text-slate-300 transition hover:text-red-400 group-hover:flex"
+              title="Remove"
+            >
+              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {adding ? (
+        <div className="mt-1.5 flex items-center gap-1.5">
+          <label className="relative cursor-pointer">
+            <span className="block h-3.5 w-3.5 flex-shrink-0 rounded-sm border border-slate-200" style={{ background: newColor }} />
+            <input type="color" className="absolute inset-0 h-full w-full cursor-pointer opacity-0" value={newColor} onChange={(e) => setNewColor(e.target.value)} />
+          </label>
+          <input
+            ref={inputRef}
+            autoFocus
+            className="min-w-0 flex-1 rounded border border-slate-200 px-1.5 py-0.5 text-[11px] text-slate-700 outline-none focus:border-brand-400"
+            placeholder="Category name…"
+            value={newLabel}
+            onChange={(e) => setNewLabel(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") addEntry(); if (e.key === "Escape") setAdding(false); }}
+          />
+          <button onClick={addEntry} className="text-[10px] font-semibold text-brand-600 hover:underline">Add</button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          className="mt-1 flex items-center gap-1 text-[10px] text-slate-400 transition hover:text-brand-600"
+        >
+          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          </svg>
+          Add category
+        </button>
+      )}
+    </div>
+  );
+}
+
 interface LeftSidebarProps {
   visibleLevels: Set<number>;
   onToggleLevel: (level: number) => void;
@@ -28,6 +130,13 @@ interface LeftSidebarProps {
 export default function LeftSidebar({ visibleLevels, onToggleLevel }: LeftSidebarProps) {
   const [folders, setFolders] = useState<ClientFolder[]>([]);
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
+  const [legendOpen, setLegendOpen] = useState(true);
+
+  const legend = useCatalogStore((s) => s.legend);
+  const setLegend = useCatalogStore((s) => s.setLegend);
+
+  const updateFill = (fill: LegendEntry[]) => setLegend({ ...legend, fill });
+  const updateBorder = (border: LegendEntry[]) => setLegend({ ...legend, border });
 
   useEffect(() => {
     fetch("/api/clients")
@@ -126,7 +235,7 @@ export default function LeftSidebar({ visibleLevels, onToggleLevel }: LeftSideba
       </div>
 
       {/* ── Layers / Legend ── */}
-      <div className="p-4">
+      <div className="border-b border-slate-100 p-4">
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
           Layers
         </h3>
@@ -151,6 +260,28 @@ export default function LeftSidebar({ visibleLevels, onToggleLevel }: LeftSideba
             </li>
           ))}
         </ul>
+      </div>
+
+      {/* ── Color Legend ── */}
+      <div className="p-4">
+        <button
+          className="mb-2 flex w-full items-center justify-between text-xs font-semibold uppercase tracking-wider text-slate-500 hover:text-slate-700"
+          onClick={() => setLegendOpen((v) => !v)}
+        >
+          <span>Color Legend</span>
+          <svg
+            className={`h-3.5 w-3.5 transition-transform ${legendOpen ? "rotate-90" : ""}`}
+            fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+          </svg>
+        </button>
+        {legendOpen && (
+          <>
+            <LegendSection title="Background" entries={legend.fill} onUpdate={updateFill} />
+            <LegendSection title="Border" entries={legend.border} onUpdate={updateBorder} />
+          </>
+        )}
       </div>
     </aside>
   );

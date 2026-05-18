@@ -90,6 +90,8 @@ function DashboardContent() {
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiPickMode, setAiPickMode] = useState(false);
   const [aiTargetNodeId, setAiTargetNodeId] = useState<string | null>(null);
+  // Properties sidebar — independent of AI panel
+  const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(false);
   const [dropIndicator, setDropIndicator] = useState<{ x: number; y: number; width: number; targetId: string; mode: "after" | "into"; insertAfterId: string | null; newParentId: string | null } | null>(null);
   const dropIndicatorRef = useRef(dropIndicator);
   dropIndicatorRef.current = dropIndicator;
@@ -628,13 +630,42 @@ function DashboardContent() {
 
   /** Apply AI-generated commands: runs locally, marks dirty, no DB write */
   const applyAICommands = useCallback(
-    (commands: DiagramCommand[]) => {
+    (commands: DiagramCommand[]): string[] => {
+      // Handle SET_LEGEND / REMOVE_LEGEND commands before passing the rest to the executor
+      const legendCmds = commands.filter((c) => c.type === "SET_LEGEND" || c.type === "REMOVE_LEGEND") as Extract<DiagramCommand, { type: "SET_LEGEND" | "REMOVE_LEGEND" }>[];
+      const otherCmds = commands.filter((c) => c.type !== "SET_LEGEND" && c.type !== "REMOVE_LEGEND");
+
+      if (legendCmds.length > 0) {
+        const { legend, setLegend } = useCatalogStore.getState();
+        let fill = [...legend.fill];
+        let border = [...legend.border];
+        for (const cmd of legendCmds) {
+          if (cmd.type === "SET_LEGEND") {
+            const entry = { id: cmd.entryId, label: cmd.label, color: cmd.color };
+            if (cmd.slot === "fill") {
+              const idx = fill.findIndex((e) => e.id === cmd.entryId);
+              fill = idx === -1 ? [...fill, entry] : fill.map((e, i) => (i === idx ? entry : e));
+            } else {
+              const idx = border.findIndex((e) => e.id === cmd.entryId);
+              border = idx === -1 ? [...border, entry] : border.map((e, i) => (i === idx ? entry : e));
+            }
+          } else if (cmd.type === "REMOVE_LEGEND") {
+            if (cmd.slot === "fill") fill = fill.filter((e) => e.id !== cmd.entryId);
+            else border = border.filter((e) => e.id !== cmd.entryId);
+          }
+        }
+        setLegend({ fill, border });
+      }
+
+      let errors: string[] = [];
       setCapabilities((prevCaps) => {
-        const result = executeCommands(commands, prevCaps, nodeStyles);
+        const result = executeCommands(otherCmds, prevCaps, nodeStyles);
+        errors = result.errors;
         setNodeStyles(result.nodePatches);
         useCatalogStore.setState({ capabilities: result.capabilities, isDirty: true });
         return result.capabilities;
       });
+      return errors;
     },
     [nodeStyles]
   );
@@ -731,7 +762,8 @@ function DashboardContent() {
           <button
             onClick={() => {
               setAiPanelOpen((v) => {
-                if (!v) { setSelectedNodeId(null); setSelectedNodeIds(new Set()); } // opening AI panel: close right sidebar
+                if (!v) { setSelectedNodeId(null); setSelectedNodeIds(new Set()); }
+                setPropertiesPanelOpen(false);
                 return !v;
               });
             }}
@@ -745,6 +777,20 @@ function DashboardContent() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
             </svg>
             AI map editor
+          </button>
+          {/* Properties panel toggle */}
+          <button
+            onClick={() => { setPropertiesPanelOpen((v) => !v); setAiPanelOpen(false); }}
+            className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition ${
+              propertiesPanelOpen
+                ? "border-indigo-500 bg-indigo-500 text-white"
+                : "border-slate-200 bg-white text-slate-700 hover:border-indigo-400 hover:text-indigo-600"
+            }`}
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
+            </svg>
+            Properties
           </button>
           <button
             onClick={handleApply}

@@ -48,6 +48,22 @@ export function executeCommands(
         break;
       }
 
+      case "RESET_STYLE": {
+        const cap = current.find((c) => c.id === cmd.nodeId);
+        if (!cap) {
+          errors.push(`RESET_STYLE: node "${cmd.nodeId}" not found`);
+          break;
+        }
+        const resetFill = cmd.fill !== false; // default true
+        const resetBorder = cmd.border !== false; // default true
+        const existing = { ...(nodePatches[cmd.nodeId] ?? {}) };
+        if (resetFill) delete existing.fill;
+        if (resetBorder) delete existing.border;
+        nodePatches[cmd.nodeId] = existing;
+        messages.push(`Style reset on "${cap.name}"`);
+        break;
+      }
+
       case "SET_NOTE": {
         const cap = current.find((c) => c.id === cmd.nodeId);
         if (!cap) {
@@ -230,6 +246,11 @@ export function executeCommands(
         messages.push(`Description updated on "${cap.name}"`);
         break;
       }
+
+      case "SET_LEGEND":
+      case "REMOVE_LEGEND":
+        // Handled by the dashboard before executeCommands is called — skip silently.
+        break;
 
       default:
         errors.push(`Unknown command type: ${(cmd as DiagramCommand).type}`);
