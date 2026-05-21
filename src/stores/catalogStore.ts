@@ -54,7 +54,7 @@ export interface CatalogActions {
   /** Mark store as dirty (after any local edit) */
   markDirty: () => void;
 
-  /** Replace capabilities array (e.g. after edit) */
+  /** Sync capabilities from the canvas (no undo tracking — managed locally in dashboard) */
   setCapabilities: (capabilities: Capability[]) => void;
 
   /** Rename a single capability in the store */

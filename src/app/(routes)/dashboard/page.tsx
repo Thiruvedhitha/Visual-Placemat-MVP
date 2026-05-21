@@ -21,6 +21,7 @@ import LeftSidebar from "@/components/canvas/LeftSidebar";
 import RightSidebar from "@/components/canvas/RightSidebar";
 import CanvasToolbar from "@/components/canvas/CanvasToolbar";
 import AIMapEditor from "@/components/canvas/AIMapEditor";
+import VersionHistoryPanel from "@/components/canvas/VersionHistoryPanel";
 import { buildCanvasNodes } from "@/lib/canvas/layoutEngine";
 import { handleNodeDragDrop } from "@/lib/canvas/dragDropHandler";
 import { executeCommands } from "@/lib/commands/executor";
@@ -65,6 +66,23 @@ function DashboardContent() {
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
 
+  // Local undo/redo stacks — in memory only, never saved to DB (max 10 steps)
+  type UndoSnapshot = { capabilities: Capability[]; nodeStyles: Record<string, NodeStylePatch> };
+  const [undoStack, setUndoStack] = useState<UndoSnapshot[]>([]);
+  const [redoStack, setRedoStack] = useState<UndoSnapshot[]>([]);
+  // Refs so callbacks always see latest values without stale closures
+  const undoStackRef = useRef<UndoSnapshot[]>([]);
+  const redoStackRef = useRef<UndoSnapshot[]>([]);
+  const capabilitiesRef = useRef<Capability[]>([]);
+  const nodeStylesRef = useRef<Record<string, NodeStylePatch>>({});
+  // Debounce refs for text/color changes — captures "before" snapshot, pushes after idle
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const debounceSnapshotRef = useRef<UndoSnapshot | null>(null);
+  const undoLoadedRef = useRef(false);
+  undoStackRef.current = undoStack;
+  redoStackRef.current = redoStack;
+  capabilitiesRef.current = capabilities;
+
   // Canvas state
   const [nodes, setNodes] = useState<Node<CapabilityNodeData>[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -77,8 +95,9 @@ function DashboardContent() {
   const [nodeStyles, setNodeStylesLocal] = useState<Record<string, NodeStylePatch>>(
     () => useCatalogStore.getState().nodeStyles
   );
+  nodeStylesRef.current = nodeStyles;
 
-  // Wrapper that syncs local state to Zustand store
+  // Wrapper that syncs local state to Zustand store (does NOT push undo — use pushUndoAndSet for that)
   const setNodeStyles = useCallback((updater: Record<string, NodeStylePatch> | ((prev: Record<string, NodeStylePatch>) => Record<string, NodeStylePatch>)) => {
     setNodeStylesLocal((prev) => {
       const next = typeof updater === "function" ? updater(prev) : updater;
@@ -92,6 +111,9 @@ function DashboardContent() {
   const [aiTargetNodeId, setAiTargetNodeId] = useState<string | null>(null);
   // Properties sidebar — independent of AI panel
   const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(false);
+  // Version history panel
+  const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
+  const [historyKey, setHistoryKey] = useState(0); // increment to force panel refresh
   const [dropIndicator, setDropIndicator] = useState<{ x: number; y: number; width: number; targetId: string; mode: "after" | "into"; insertAfterId: string | null; newParentId: string | null } | null>(null);
   const dropIndicatorRef = useRef(dropIndicator);
   dropIndicatorRef.current = dropIndicator;
@@ -107,6 +129,8 @@ function DashboardContent() {
     // If Zustand has capabilities for the same catalog, use those
     if (storeCapabilities.length > 0 && (!catalogIdParam || catalogIdParam === storeCatalogId)) {
       setCapabilities(storeCapabilities);
+      setUndoStack([]);
+      setRedoStack([]);
       setLoading(false);
       return;
     }
@@ -122,6 +146,8 @@ function DashboardContent() {
       .then((data) => {
         if (data.catalog && Array.isArray(data.capabilities)) {
           setCapabilities(data.capabilities);
+          setUndoStack([]);
+          setRedoStack([]);
           loadFromDB(catalogIdParam, data.catalog.name || catalogIdParam, data.capabilities);
           // Load saved node styles from DB
           if (data.catalog.node_styles && typeof data.catalog.node_styles === "object") {
@@ -137,6 +163,79 @@ function DashboardContent() {
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, []);
+
+  // Load undo/redo stacks from localStorage (once per catalog)
+  useEffect(() => {
+    const key = storeCatalogId || catalogIdParam;
+    if (!key || undoLoadedRef.current) return;
+    undoLoadedRef.current = true;
+    try {
+      const saved = localStorage.getItem(`vp-undo-${key}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed.undo) && parsed.undo.length > 0) setUndoStack(parsed.undo);
+        if (Array.isArray(parsed.redo) && parsed.redo.length > 0) setRedoStack(parsed.redo);
+      }
+    } catch { /* ignore parse errors */ }
+  }, [storeCatalogId, catalogIdParam]);
+
+  // Persist undo/redo stacks to localStorage on every change
+  useEffect(() => {
+    const key = storeCatalogId || catalogIdParam;
+    if (!key || !undoLoadedRef.current) return;
+    try {
+      localStorage.setItem(`vp-undo-${key}`, JSON.stringify({ undo: undoStack, redo: redoStack }));
+    } catch { /* ignore quota errors */ }
+  }, [undoStack, redoStack, storeCatalogId, catalogIdParam]);
+
+  /**
+   * Snapshot current state → undo stack (max 10), then apply new caps + styles.
+   * Use for EVERY mutation: drag, rename, delete, reparent, color, border, AI apply.
+   */
+  const pushUndoAndSet = useCallback((newCaps: Capability[], newStyles?: Record<string, NodeStylePatch>) => {
+    const snapshot = { capabilities: capabilitiesRef.current, nodeStyles: nodeStylesRef.current };
+    setUndoStack((prev) => [...prev.slice(-9), snapshot]); // keep last 10
+    setRedoStack([]);
+    setCapabilities(newCaps);
+    const styles = newStyles ?? nodeStylesRef.current;
+    setNodeStylesLocal(styles);
+    useCatalogStore.setState({ capabilities: newCaps, nodeStyles: styles, isDirty: true });
+  }, []);
+
+  // Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) — local in-memory undo/redo
+  useEffect(() => {
+    const applySnapshot = (snap: { capabilities: Capability[]; nodeStyles: Record<string, NodeStylePatch> }) => {
+      setCapabilities(snap.capabilities);
+      setNodeStylesLocal(snap.nodeStyles);
+      useCatalogStore.setState({ capabilities: snap.capabilities, nodeStyles: snap.nodeStyles, isDirty: true });
+    };
+
+    const handler = (e: KeyboardEvent) => {
+      // Allow Ctrl+Z / Ctrl+Y even when an input/textarea has focus
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        const stack = undoStackRef.current;
+        if (stack.length === 0) return;
+        const prev = stack[stack.length - 1];
+        setUndoStack(stack.slice(0, -1));
+        setRedoStack((r) => [...r, { capabilities: capabilitiesRef.current, nodeStyles: nodeStylesRef.current }]);
+        applySnapshot(prev);
+      } else if (
+        (e.ctrlKey || e.metaKey) &&
+        (e.key === "y" || (e.key === "z" && e.shiftKey))
+      ) {
+        e.preventDefault();
+        const stack = redoStackRef.current;
+        if (stack.length === 0) return;
+        const next = stack[stack.length - 1];
+        setRedoStack(stack.slice(0, -1));
+        setUndoStack((u) => [...u, { capabilities: capabilitiesRef.current, nodeStyles: nodeStylesRef.current }]);
+        applySnapshot(next);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
   }, []);
 
   // Handler functions - define before useEffect that uses them
@@ -517,11 +616,7 @@ function DashboardContent() {
         setTimeout(() => setDragMessage(null), 3000);
         rebuildInteractiveNodes();
       } else {
-        setCapabilities(result.updatedCapabilities);
-        useCatalogStore.setState({
-          capabilities: result.updatedCapabilities,
-          isDirty: true,
-        });
+        pushUndoAndSet(result.updatedCapabilities);
         setSelectedNodeId(node.id);
         setSelectedNodeIds(new Set([node.id]));
         setDragMessage("✅ " + result.message);
@@ -535,7 +630,7 @@ function DashboardContent() {
 
   const onUpdateNode = useCallback(
     (id: string, patch: Partial<CapabilityNodeData>) => {
-      // Persist visual styles (fill, border) in nodeStyles map
+      // Persist visual styles (fill, border) — debounced so rapid color-picker drags don't flood the stack
       const visualKeys = ["fill", "border"] as const;
       const stylePatch: Record<string, string | undefined> = {};
       let hasStyle = false;
@@ -546,27 +641,48 @@ function DashboardContent() {
         }
       }
       if (hasStyle) {
-        setNodeStyles((prev) => ({
-          ...prev,
-          [id]: { ...prev[id], ...stylePatch },
-        }));
-        useCatalogStore.setState({ isDirty: true });
+        // Capture the "before" state once at the start of a change sequence
+        if (!debounceSnapshotRef.current) {
+          debounceSnapshotRef.current = { capabilities: capabilitiesRef.current, nodeStyles: nodeStylesRef.current };
+        }
+        if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+        const newStyles = { ...nodeStylesRef.current, [id]: { ...nodeStylesRef.current[id], ...stylePatch } };
+        // Apply immediately for visual feedback (no undo push yet)
+        setNodeStylesLocal(newStyles);
+        useCatalogStore.setState({ nodeStyles: newStyles, isDirty: true });
+        const beforeSnap = debounceSnapshotRef.current;
+        debounceTimerRef.current = setTimeout(() => {
+          setUndoStack((prev) => [...prev.slice(-9), beforeSnap]);
+          setRedoStack([]);
+          debounceSnapshotRef.current = null;
+        }, 400);
       }
 
-      // Persist structural fields to capabilities store
+      // Persist structural fields — debounced so typing doesn't create per-keystroke undo entries
       if ("label" in patch || "description" in patch || "note" in patch) {
-        setCapabilities((prev) => {
-          const updated = prev.map((c) => {
-            if (c.id !== id) return c;
-            const changes: Partial<Capability> = {};
-            if ("label" in patch) changes.name = patch.label || c.name;
-            if ("description" in patch) changes.description = patch.description || "";
-            if ("note" in patch) changes.note = patch.note || null;
-            return { ...c, ...changes };
-          });
-          useCatalogStore.setState({ capabilities: updated, isDirty: true });
-          return updated;
+        const current = capabilitiesRef.current;
+        const updated = current.map((c) => {
+          if (c.id !== id) return c;
+          const changes: Partial<Capability> = {};
+          if ("label" in patch) changes.name = patch.label || c.name;
+          if ("description" in patch) changes.description = patch.description || "";
+          if ("note" in patch) changes.note = patch.note || null;
+          return { ...c, ...changes };
         });
+        // Capture "before" state once at the start of a typing session
+        if (!debounceSnapshotRef.current) {
+          debounceSnapshotRef.current = { capabilities: capabilitiesRef.current, nodeStyles: nodeStylesRef.current };
+        }
+        if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+        // Apply immediately for visual feedback
+        setCapabilities(updated);
+        useCatalogStore.setState({ capabilities: updated, isDirty: true });
+        const beforeSnap = debounceSnapshotRef.current;
+        debounceTimerRef.current = setTimeout(() => {
+          setUndoStack((prev) => [...prev.slice(-9), beforeSnap]);
+          setRedoStack([]);
+          debounceSnapshotRef.current = null;
+        }, 600);
       }
     },
     []
@@ -574,58 +690,49 @@ function DashboardContent() {
 
   const onReparent = useCallback(
     (nodeId: string, newParentId: string) => {
-      setCapabilities((prev) => {
-        const node = prev.find((c) => c.id === nodeId);
-        if (!node) return prev;
-        const newParent = prev.find((c) => c.id === newParentId);
-        if (!newParent) return prev;
-        const newLevel = Math.min(newParent.level + 1, 3) as 0 | 1 | 2 | 3;
-        const siblings = prev.filter((c) => c.parent_id === newParentId);
-        const maxSort = siblings.length > 0 ? Math.max(...siblings.map((s) => s.sort_order)) : -1;
-        const updated = prev.map((c) =>
-          c.id === nodeId
-            ? { ...c, parent_id: newParentId, level: newLevel, sort_order: maxSort + 1 }
-            : c
-        );
-        useCatalogStore.setState({ capabilities: updated, isDirty: true });
-        return updated;
-      });
+      const prev = capabilitiesRef.current;
+      const node = prev.find((c) => c.id === nodeId);
+      if (!node) return;
+      const newParent = prev.find((c) => c.id === newParentId);
+      if (!newParent) return;
+      const newLevel = Math.min(newParent.level + 1, 3) as 0 | 1 | 2 | 3;
+      const siblings = prev.filter((c) => c.parent_id === newParentId);
+      const maxSort = siblings.length > 0 ? Math.max(...siblings.map((s) => s.sort_order)) : -1;
+      const updated = prev.map((c) =>
+        c.id === nodeId
+          ? { ...c, parent_id: newParentId, level: newLevel, sort_order: maxSort + 1 }
+          : c
+      );
+      pushUndoAndSet(updated);
     },
-    []
+    [pushUndoAndSet]
   );
 
   const onDetachChild = useCallback(
     (childId: string) => {
-      setCapabilities((prev) => {
-        const updated = prev.map((c) =>
-          c.id === childId ? { ...c, parent_id: null } : c
-        );
-        useCatalogStore.setState({ capabilities: updated, isDirty: true });
-        return updated;
-      });
+      const updated = capabilitiesRef.current.map((c) =>
+        c.id === childId ? { ...c, parent_id: null } : c
+      );
+      pushUndoAndSet(updated);
     },
-    []
+    [pushUndoAndSet]
   );
 
   const onDeleteNode = useCallback(
     (nodeId: string) => {
-      setCapabilities((prev) => {
-        // Collect all descendants
-        const toDelete = new Set<string>();
-        const queue = [nodeId];
-        while (queue.length > 0) {
-          const current = queue.shift()!;
-          toDelete.add(current);
-          prev.filter((c) => c.parent_id === current).forEach((c) => queue.push(c.id));
-        }
-        const updated = prev.filter((c) => !toDelete.has(c.id));
-        useCatalogStore.setState({ capabilities: updated, isDirty: true });
-        return updated;
-      });
+      const prev = capabilitiesRef.current;
+      const toDelete = new Set<string>();
+      const queue = [nodeId];
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        toDelete.add(current);
+        prev.filter((c) => c.parent_id === current).forEach((c) => queue.push(c.id));
+      }
+      pushUndoAndSet(prev.filter((c) => !toDelete.has(c.id)));
       setSelectedNodeId(null);
       setSelectedNodeIds(new Set());
     },
-    []
+    [pushUndoAndSet]
   );
 
   /** Apply AI-generated commands: runs locally, marks dirty, no DB write */
@@ -658,16 +765,13 @@ function DashboardContent() {
       }
 
       let errors: string[] = [];
-      setCapabilities((prevCaps) => {
-        const result = executeCommands(otherCmds, prevCaps, nodeStyles);
-        errors = result.errors;
-        setNodeStyles(result.nodePatches);
-        useCatalogStore.setState({ capabilities: result.capabilities, isDirty: true });
-        return result.capabilities;
-      });
+      const prevCaps = capabilitiesRef.current;
+      const result = executeCommands(otherCmds, prevCaps, nodeStylesRef.current);
+      errors = result.errors;
+      pushUndoAndSet(result.capabilities, result.nodePatches);
       return errors;
     },
-    [nodeStyles]
+    [pushUndoAndSet]
   );
 
   // Rebuild nodes when capabilities or visible levels change
@@ -696,12 +800,26 @@ function DashboardContent() {
         return;
       }
       markSaved(data.catalogId);
+      setHistoryKey((k) => k + 1); // refresh version history panel
     } catch {
       setApplyError("Network error. Please try again.");
     } finally {
       setApplying(false);
     }
   };
+
+  // Restore a historical version
+  const handleRestore = useCallback(
+    (restoredCapabilities: Capability[], restoredStyles: Record<string, NodeStylePatch>) => {
+      setCapabilities(restoredCapabilities);
+      setUndoStack([]);
+      setRedoStack([]);
+      setNodeStyles(restoredStyles);
+      loadFromDB(storeCatalogId!, catalogName, restoredCapabilities);
+      setApplyError(null);
+    },
+    [loadFromDB, storeCatalogId, catalogName, setNodeStyles]
+  );
 
   const selectedNode = useMemo(
     () => (selectedNodeId ? nodes.find((n) => n.id === selectedNodeId) ?? null : null),
@@ -755,6 +873,47 @@ function DashboardContent() {
             interactionMode={interactionMode}
             onModeChange={setInteractionMode}
           />
+          {/* Undo / Redo buttons */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => {
+                const stack = undoStackRef.current;
+                if (stack.length === 0) return;
+                const prev = stack[stack.length - 1];
+                setUndoStack(stack.slice(0, -1));
+                setRedoStack((r) => [...r, { capabilities: capabilitiesRef.current, nodeStyles: nodeStylesRef.current }]);
+                setCapabilities(prev.capabilities);
+                setNodeStylesLocal(prev.nodeStyles);
+                useCatalogStore.setState({ capabilities: prev.capabilities, nodeStyles: prev.nodeStyles, isDirty: true });
+              }}
+              disabled={undoStack.length === 0}
+              title={`Undo (Ctrl+Z)${undoStack.length > 0 ? ` · ${undoStack.length} step${undoStack.length > 1 ? "s" : ""}` : ""}`}
+              className="rounded p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+              </svg>
+            </button>
+            <button
+              onClick={() => {
+                const stack = redoStackRef.current;
+                if (stack.length === 0) return;
+                const next = stack[stack.length - 1];
+                setRedoStack(stack.slice(0, -1));
+                setUndoStack((u) => [...u, { capabilities: capabilitiesRef.current, nodeStyles: nodeStylesRef.current }]);
+                setCapabilities(next.capabilities);
+                setNodeStylesLocal(next.nodeStyles);
+                useCatalogStore.setState({ capabilities: next.capabilities, nodeStyles: next.nodeStyles, isDirty: true });
+              }}
+              disabled={redoStack.length === 0}
+              title={`Redo (Ctrl+Y)${redoStack.length > 0 ? ` · ${redoStack.length} step${redoStack.length > 1 ? "s" : ""}` : ""}`}
+              className="rounded p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 15l6-6m0 0l-6-6m6 6H9a6 6 0 000 12h3" />
+              </svg>
+            </button>
+          </div>
           {applyError && (
             <p className="text-xs text-red-500">{applyError}</p>
           )}
@@ -821,6 +980,26 @@ function DashboardContent() {
           >
             Export
           </Link>
+          {/* Version history toggle — only shown after first save */}
+          {storeCatalogId && (
+            <button
+              onClick={() => {
+                setHistoryPanelOpen((v) => !v);
+                setAiPanelOpen(false);
+                setPropertiesPanelOpen(false);
+              }}
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition ${
+                historyPanelOpen
+                  ? "border-violet-500 bg-violet-500 text-white"
+                  : "border-slate-200 bg-white text-slate-700 hover:border-violet-400 hover:text-violet-600"
+              }`}
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              History
+            </button>
+          )}
         </div>
       </header>
 
@@ -989,12 +1168,9 @@ function DashboardContent() {
                       defaultValue="#ffffff"
                       onChange={(e) => {
                         const fill = e.target.value;
-                        setNodeStyles((prev) => {
-                          const next = { ...prev };
-                          selectedNodeIds.forEach((id) => { next[id] = { ...next[id], fill }; });
-                          return next;
-                        });
-                        useCatalogStore.setState({ isDirty: true });
+                        const next = { ...nodeStylesRef.current };
+                        selectedNodeIds.forEach((id) => { next[id] = { ...next[id], fill }; });
+                        pushUndoAndSet(capabilitiesRef.current, next);
                       }}
                       className="h-8 w-10 cursor-pointer rounded border border-slate-200 p-0.5"
                     />
@@ -1011,12 +1187,9 @@ function DashboardContent() {
                       defaultValue="#e2e8f0"
                       onChange={(e) => {
                         const border = e.target.value;
-                        setNodeStyles((prev) => {
-                          const next = { ...prev };
-                          selectedNodeIds.forEach((id) => { next[id] = { ...next[id], border }; });
-                          return next;
-                        });
-                        useCatalogStore.setState({ isDirty: true });
+                        const next = { ...nodeStylesRef.current };
+                        selectedNodeIds.forEach((id) => { next[id] = { ...next[id], border }; });
+                        pushUndoAndSet(capabilitiesRef.current, next);
                       }}
                       className="h-8 w-10 cursor-pointer rounded border border-slate-200 p-0.5"
                     />
@@ -1064,6 +1237,17 @@ function DashboardContent() {
               </div>
             )}
           </div>
+        )}
+
+        {/* Version History sidebar */}
+        {historyPanelOpen && (
+          <aside className="flex w-72 flex-shrink-0 flex-col overflow-hidden border-l border-slate-200 bg-white">
+            <VersionHistoryPanel
+              key={historyKey}
+              catalogId={storeCatalogId}
+              onRestore={handleRestore}
+            />
+          </aside>
         )}
       </div>
 

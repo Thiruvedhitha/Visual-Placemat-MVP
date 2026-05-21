@@ -99,8 +99,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Remap nodeStyles keys from client IDs to real DB UUIDs
+    let remappedStyles: Record<string, unknown> = {};
     if (nodeStyles && typeof nodeStyles === "object") {
-      const remappedStyles: Record<string, unknown> = {};
       for (const [oldId, style] of Object.entries(nodeStyles)) {
         const realId = tempToReal.get(oldId) ?? oldId;
         remappedStyles[realId] = style;
@@ -112,9 +112,72 @@ export async function POST(request: NextRequest) {
       if (styleError) console.error("Failed to update node_styles:", styleError.message);
     }
 
+    // ── Version history: insert a new visual_maps snapshot on every Apply ──
+    // Build snapshot with real DB IDs (parent_id resolved)
+    const capabilitySnapshot = capabilities.map(
+      (c: {
+        id: string;
+        parent_id: string | null;
+        name: string;
+        description: string | null;
+        note: string | null;
+        level: number;
+        sort_order: number;
+        source: string;
+      }) => ({
+        id: tempToReal.get(c.id) ?? c.id,
+        parent_id: c.parent_id ? (tempToReal.get(c.parent_id) ?? c.parent_id) : null,
+        name: c.name,
+        level: c.level,
+        description: c.description,
+        note: c.note || null,
+        sort_order: c.sort_order,
+        source: c.source || "xlsx_import",
+      })
+    );
+
+    // Deactivate old versions
+    await supabaseAdmin
+      .from("visual_maps")
+      .update({ is_active: false })
+      .eq("catalog_id", finalCatalogId);
+
+    // Determine next version number
+    const { data: lastMap } = await supabaseAdmin
+      .from("visual_maps")
+      .select("version_number")
+      .eq("catalog_id", finalCatalogId)
+      .order("version_number", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const nextVersion = (lastMap?.version_number ?? 0) + 1;
+
+    // Insert new snapshot — version number increments on each Apply
+    const { data: newMap, error: mapError } = await supabaseAdmin
+      .from("visual_maps")
+      .insert({
+        catalog_id: finalCatalogId,
+        name: catalogName,
+        version_number: nextVersion,
+        is_active: true,
+        layout_data: {
+          capabilities: capabilitySnapshot,
+          nodeStyles: remappedStyles,
+        },
+      })
+      .select("id, version_number")
+      .single();
+
+    if (mapError) {
+      console.error("Failed to insert visual_maps snapshot:", mapError.message);
+    }
+
     return NextResponse.json({
       success: true,
       catalogId: finalCatalogId,
+      versionId: newMap?.id ?? null,
+      versionNumber: newMap?.version_number ?? nextVersion,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
