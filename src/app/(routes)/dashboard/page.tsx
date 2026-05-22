@@ -21,6 +21,8 @@ import LeftSidebar from "@/components/canvas/LeftSidebar";
 import RightSidebar from "@/components/canvas/RightSidebar";
 import CanvasToolbar from "@/components/canvas/CanvasToolbar";
 import AIMapEditor from "@/components/canvas/AIMapEditor";
+import AddNodeWizard from "@/components/canvas/AddNodeWizard";
+import { showToast } from "@/components/ui/Toast";
 import VersionHistoryPanel from "@/components/canvas/VersionHistoryPanel";
 import { buildCanvasNodes } from "@/lib/canvas/layoutEngine";
 import { handleNodeDragDrop } from "@/lib/canvas/dragDropHandler";
@@ -91,7 +93,7 @@ function DashboardContent() {
     new Set([0, 1, 2, 3])
   );
   const [interactionMode, setInteractionMode] = useState<"select" | "pan">("select");
-  const [dragMessage, setDragMessage] = useState<string | null>(null);
+  const [addNodeOpen, setAddNodeOpen] = useState(false);
   const [nodeStyles, setNodeStylesLocal] = useState<Record<string, NodeStylePatch>>(
     () => useCatalogStore.getState().nodeStyles
   );
@@ -612,15 +614,13 @@ function DashboardContent() {
       );
 
       if (result.message.includes("Cannot") || result.message.includes("not found")) {
-        setDragMessage("❌ " + result.message);
-        setTimeout(() => setDragMessage(null), 3000);
+        showToast.error(result.message);
         rebuildInteractiveNodes();
       } else {
         pushUndoAndSet(result.updatedCapabilities);
         setSelectedNodeId(node.id);
         setSelectedNodeIds(new Set([node.id]));
-        setDragMessage("✅ " + result.message);
-        setTimeout(() => setDragMessage(null), 3000);
+        showToast.success(result.message);
       }
 
       setDropIndicator(null);
@@ -704,16 +704,19 @@ function DashboardContent() {
           : c
       );
       pushUndoAndSet(updated);
+      showToast.success(`Moved '${node.name}' under '${newParent.name}'`);
     },
     [pushUndoAndSet]
   );
 
   const onDetachChild = useCallback(
     (childId: string) => {
+      const node = capabilitiesRef.current.find((c) => c.id === childId);
       const updated = capabilitiesRef.current.map((c) =>
         c.id === childId ? { ...c, parent_id: null } : c
       );
       pushUndoAndSet(updated);
+      if (node) showToast.success(`Detached '${node.name}'`);
     },
     [pushUndoAndSet]
   );
@@ -721,6 +724,7 @@ function DashboardContent() {
   const onDeleteNode = useCallback(
     (nodeId: string) => {
       const prev = capabilitiesRef.current;
+      const target = prev.find((c) => c.id === nodeId);
       const toDelete = new Set<string>();
       const queue = [nodeId];
       while (queue.length > 0) {
@@ -731,6 +735,7 @@ function DashboardContent() {
       pushUndoAndSet(prev.filter((c) => !toDelete.has(c.id)));
       setSelectedNodeId(null);
       setSelectedNodeIds(new Set());
+      if (target) showToast.success(`Deleted '${target.name}'${toDelete.size > 1 ? ` (+${toDelete.size - 1} children)` : ""}`);
     },
     [pushUndoAndSet]
   );
@@ -1005,7 +1010,7 @@ function DashboardContent() {
 
       {/* Body: left sidebar + canvas + right sidebar */}
       <div className="flex flex-1 overflow-hidden">
-        <LeftSidebar visibleLevels={visibleLevels} onToggleLevel={onToggleLevel} />
+        <LeftSidebar visibleLevels={visibleLevels} onToggleLevel={onToggleLevel} onAddNode={() => setAddNodeOpen(true)} />
 
         {/* Canvas area */}
         <div className="relative flex-1 overflow-auto">
@@ -1086,11 +1091,16 @@ function DashboardContent() {
             )}
           </ReactFlow>
 
-          {dragMessage && (
-            <div className="absolute bottom-4 left-4 rounded-lg bg-blue-600 px-3 py-2 text-xs text-white shadow-lg">
-              {dragMessage}
-            </div>
-          )}
+          {/* Add Node wizard */}
+          <AddNodeWizard
+            open={addNodeOpen}
+            onClose={() => setAddNodeOpen(false)}
+            capabilities={capabilities}
+            onApply={(cmds) => {
+              applyAICommands(cmds);
+              showToast.success(`Added ${cmds.length} node${cmds.length !== 1 ? "s" : ""}`);
+            }}
+          />
 
           {/* AI Map Editor panel — overlays the canvas from the right */}
           <AIMapEditor

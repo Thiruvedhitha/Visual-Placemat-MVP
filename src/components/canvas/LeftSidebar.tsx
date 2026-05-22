@@ -125,9 +125,10 @@ function LegendSection({
 interface LeftSidebarProps {
   visibleLevels: Set<number>;
   onToggleLevel: (level: number) => void;
+  onAddNode?: () => void;
 }
 
-export default function LeftSidebar({ visibleLevels, onToggleLevel }: LeftSidebarProps) {
+export default function LeftSidebar({ visibleLevels, onToggleLevel, onAddNode }: LeftSidebarProps) {
   const [folders, setFolders] = useState<ClientFolder[]>([]);
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [legendOpen, setLegendOpen] = useState(true);
@@ -283,6 +284,19 @@ export default function LeftSidebar({ visibleLevels, onToggleLevel }: LeftSideba
           </>
         )}
       </div>
+
+      {/* ── Add Node ── */}
+      {onAddNode && (
+        <div className="mt-auto border-t border-slate-100 p-4">
+          <button
+            onClick={onAddNode}
+            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-blue-600 bg-blue-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+            Add Node
+          </button>
+        </div>
+      )}
     </aside>
   );
 }

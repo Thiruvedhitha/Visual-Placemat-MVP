@@ -12,6 +12,7 @@ import * as XLSX from "xlsx";
 import { useCatalogStore } from "@/stores/catalogStore";
 import { buildCanvasNodes } from "@/lib/canvas/layoutEngine";
 import CapabilityNode from "@/components/canvas/CapabilityNode";
+import { showToast } from "@/components/ui/Toast";
 
 const NODE_TYPES = { capability: CapabilityNode };
 const ALL_LEVELS = new Set([0, 1, 2, 3]);
@@ -172,7 +173,7 @@ function ExportContent() {
     if (format === "view-link") {
       const id = storeCatalogId || catalogId;
       if (!id) {
-        alert("Please save the catalog first (click Apply on the canvas) before creating a view link.");
+        showToast.error("Please save the catalog first (click Apply on the canvas) before creating a view link.");
         return;
       }
       const viewUrl = `${window.location.origin}/view?catalogId=${encodeURIComponent(id)}`;
@@ -184,7 +185,7 @@ function ExportContent() {
     if (format === "duplicate-link") {
       const id = storeCatalogId || catalogId;
       if (!id) {
-        alert("Please save the catalog first (click Apply on the canvas) before creating a duplicate link.");
+        showToast.error("Please save the catalog first (click Apply on the canvas) before creating a duplicate link.");
         return;
       }
       const dupUrl = `${window.location.origin}/dashboard?catalogId=${encodeURIComponent(id)}`;
@@ -387,7 +388,7 @@ function ExportContent() {
       }
     } catch (err) {
       console.error("Export failed:", err);
-      alert("Export failed. Please try again.");
+      showToast.error("Export failed. Please try again.");
     } finally {
       setExporting(null);
     }

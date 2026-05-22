@@ -5,6 +5,7 @@ import type { Capability } from "@/types/capability";
 import type { DiagramCommand, NodeStylePatch, Proposal } from "@/lib/commands/index";
 import type { CapabilityNodeData } from "./CapabilityNode";
 import { useCatalogStore } from "@/stores/catalogStore";
+import { showToast } from "@/components/ui/Toast";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -619,6 +620,7 @@ export default function AIMapEditor({
       name: addName.trim(),
     }]);
     setMessages((prev) => [...prev, { role: "user", text: `Added L${addLevel} node: '${addName.trim()}' ${parentLabel}` }, { role: "ai", text: `Node '${addName.trim()}' added.` }]);
+    showToast.success(`Node '${addName.trim()}' added`);
     // Record commit
     const commit: CommitEntry = { prompt: `Add L${addLevel} node: ${addName.trim()}`, summary: `Added '${addName.trim()}' ${parentLabel}`, adds: 1, deletes: 0, renames: 0, styles: 0, ts: new Date().toISOString() };
     setCommits((prev) => [...prev, commit]);
@@ -633,6 +635,7 @@ export default function AIMapEditor({
     if (!node) return;
     onAICommands([{ type: "DELETE_NODE", nodeId: node.id }]);
     setMessages((prev) => [...prev, { role: "user", text: `Delete node: '${node.name}'` }, { role: "ai", text: `Node '${node.name}' deleted.` }]);
+    showToast.success(`Node '${node.name}' deleted`);
     // Record commit
     const childCount = capabilities.filter((c) => c.parent_id === node.id).length;
     const commit: CommitEntry = { prompt: `Delete node: ${node.name}`, summary: `Deleted '${node.name}'${childCount > 0 ? ` and ${childCount} children` : ''}`, adds: 0, deletes: 1 + childCount, renames: 0, styles: 0, ts: new Date().toISOString() };
@@ -692,12 +695,27 @@ export default function AIMapEditor({
                               onClick={() => {
                                 // Apply immediately on accept
                                 onAICommands([proposal.command]);
-                                // Auto-decline all other pending proposals in this message
-                                // (e.g. only one rename can apply to the same node)
+                                // Auto-decline only OTHER proposals that target the SAME node
+                                // (e.g. competing renames for one node). Proposals for different
+                                // nodes remain independently actionable.
+                                const acceptedNodeId = (proposal.command as { nodeId?: string }).nodeId;
                                 const siblings = msg.proposals ?? [];
-                                const allDeclined: Record<string, "accepted" | "declined"> = {};
-                                siblings.forEach((p) => { allDeclined[p.id] = p.id === proposal.id ? "accepted" : "declined"; });
-                                setProposalStates((ps) => ({ ...ps, [i]: allDeclined }));
+                                setProposalStates((ps) => {
+                                  const current = { ...(ps[i] ?? {}) };
+                                  siblings.forEach((p) => {
+                                    if (p.id === proposal.id) {
+                                      current[p.id] = "accepted";
+                                    } else if (
+                                      acceptedNodeId &&
+                                      (p.command as { nodeId?: string }).nodeId === acceptedNodeId &&
+                                      current[p.id] !== "accepted" &&
+                                      current[p.id] !== "declined"
+                                    ) {
+                                      current[p.id] = "declined";
+                                    }
+                                  });
+                                  return { ...ps, [i]: current };
+                                });
                                 // Record commit for accepted proposal
                                 const stats = summarizeCommands([proposal.command]);
                                 const commit: CommitEntry = {

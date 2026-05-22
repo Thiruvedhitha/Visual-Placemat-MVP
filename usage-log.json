@@ -43,5 +43,140 @@
     "completion_tokens": 3595,
     "total_tokens": 7070,
     "cost_usd": 0.007142
+  },
+  {
+    "timestamp": "2026-05-19T06:42:05.140Z",
+    "model": "gpt-4.1-mini",
+    "mode": "command",
+    "prompt_tokens": 3202,
+    "completion_tokens": 198,
+    "total_tokens": 3400,
+    "cost_usd": 0.001598
+  },
+  {
+    "timestamp": "2026-05-19T06:42:40.769Z",
+    "model": "gpt-4.1-mini",
+    "mode": "command",
+    "prompt_tokens": 2349,
+    "completion_tokens": 355,
+    "total_tokens": 2704,
+    "cost_usd": 0.001508
+  },
+  {
+    "timestamp": "2026-05-19T06:42:57.101Z",
+    "model": "gpt-4.1-mini",
+    "mode": "suggest",
+    "prompt_tokens": 1371,
+    "completion_tokens": 302,
+    "total_tokens": 1673,
+    "cost_usd": 0.001032
+  },
+  {
+    "timestamp": "2026-05-19T06:59:04.449Z",
+    "model": "gpt-4.1-mini",
+    "mode": "command",
+    "prompt_tokens": 2263,
+    "completion_tokens": 411,
+    "total_tokens": 2674,
+    "cost_usd": 0.001563
+  },
+  {
+    "timestamp": "2026-05-19T06:59:33.454Z",
+    "model": "gpt-4.1-mini",
+    "mode": "suggest",
+    "prompt_tokens": 1139,
+    "completion_tokens": 246,
+    "total_tokens": 1385,
+    "cost_usd": 0.000849
+  },
+  {
+    "timestamp": "2026-05-19T07:00:08.948Z",
+    "model": "gpt-4.1-mini",
+    "mode": "command",
+    "prompt_tokens": 3570,
+    "completion_tokens": 353,
+    "total_tokens": 3923,
+    "cost_usd": 0.001993
+  },
+  {
+    "timestamp": "2026-05-19T07:09:07.260Z",
+    "model": "gpt-4.1-mini",
+    "mode": "command",
+    "prompt_tokens": 2421,
+    "completion_tokens": 177,
+    "total_tokens": 2598,
+    "cost_usd": 0.001252
+  },
+  {
+    "timestamp": "2026-05-19T07:09:27.437Z",
+    "model": "gpt-4.1-mini",
+    "mode": "suggest",
+    "prompt_tokens": 1382,
+    "completion_tokens": 238,
+    "total_tokens": 1620,
+    "cost_usd": 0.000934
+  },
+  {
+    "timestamp": "2026-05-19T07:10:24.877Z",
+    "model": "gpt-4.1-mini",
+    "mode": "command",
+    "prompt_tokens": 2615,
+    "completion_tokens": 66,
+    "total_tokens": 2681,
+    "cost_usd": 0.001152
+  },
+  {
+    "timestamp": "2026-05-19T07:10:41.568Z",
+    "model": "gpt-4.1-mini",
+    "mode": "command",
+    "prompt_tokens": 2584,
+    "completion_tokens": 58,
+    "total_tokens": 2642,
+    "cost_usd": 0.001126
+  },
+  {
+    "timestamp": "2026-05-19T07:13:39.330Z",
+    "model": "gpt-4.1-mini",
+    "mode": "command",
+    "prompt_tokens": 2614,
+    "completion_tokens": 141,
+    "total_tokens": 2755,
+    "cost_usd": 0.001271
+  },
+  {
+    "timestamp": "2026-05-19T07:14:01.956Z",
+    "model": "gpt-4.1-mini",
+    "mode": "command",
+    "prompt_tokens": 2679,
+    "completion_tokens": 125,
+    "total_tokens": 2804,
+    "cost_usd": 0.001272
+  },
+  {
+    "timestamp": "2026-05-19T07:17:59.851Z",
+    "model": "gpt-4.1-mini",
+    "mode": "command",
+    "prompt_tokens": 3622,
+    "completion_tokens": 361,
+    "total_tokens": 3983,
+    "cost_usd": 0.002026
+  },
+  {
+    "timestamp": "2026-05-19T07:18:38.546Z",
+    "model": "gpt-4.1-mini",
+    "mode": "chat",
+    "prompt_tokens": 2038,
+    "completion_tokens": 232,
+    "total_tokens": 2270,
+    "cost_usd": 0.001186
+  },
+  {
+    "timestamp": "2026-05-19T07:22:16.860Z",
+    "model": "gpt-4.1-mini",
+    "mode": "command",
+    "prompt_tokens": 2649,
+    "completion_tokens": 2301,
+    "total_tokens": 4950,
+    "cost_usd": 0.004741
   }
 ]

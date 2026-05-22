@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useCatalogStore } from "@/stores/catalogStore";
 import { convertRowsToCapabilities } from "@/lib/parser/rowsToCapabilities";
+import { showToast } from "@/components/ui/Toast";
 
 const SAMPLE_COLUMNS = [
   { key: "L0", label: "L0", value: "Strategic Portfolio",  bg: "bg-navy-950",  text: "text-white" },
@@ -104,7 +105,7 @@ export default function DocumentsUploadPage() {
   const handleFile = (file: File) => {
     const ext = file.name.split(".").pop()?.toLowerCase();
     if (ext !== "xlsx" && ext !== "csv") {
-      alert("Please upload an .xlsx or .csv file.");
+      showToast.error("Please upload an .xlsx or .csv file.");
       return;
     }
     setUploadedFile(file);

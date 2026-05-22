@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Navbar from "@/components/layout/Navbar";
+import ToastContainer from "@/components/ui/Toast";
 
 export const metadata: Metadata = {
   title: "VisualPlacemat — Build diagrams from data",
@@ -18,6 +19,7 @@ export default function RootLayout({
       <body className="min-h-screen bg-slate-50 antialiased">
         <Navbar />
         <main className="min-h-[calc(100vh-var(--navbar-height))]">{children}</main>
+        <ToastContainer />
       </body>
     </html>
   );
