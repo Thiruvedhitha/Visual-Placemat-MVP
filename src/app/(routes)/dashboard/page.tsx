@@ -30,8 +30,117 @@ import { executeCommands } from "@/lib/commands/executor";
 import type { DiagramCommand, NodeStylePatch } from "@/lib/commands/index";
 import type { Capability } from "@/types/capability";
 import { useCatalogStore } from "@/stores/catalogStore";
+import type { LegendEntry } from "@/stores/catalogStore";
 
 const NODE_TYPES = { capability: CapabilityNode };
+
+// ── MultiSelectColorPicker ──────────────────────────────────────────────────
+// Matches the same legend-list format as the single-select Properties panel.
+function MultiSelectColorPicker({
+  label,
+  type,
+  selectedNodeIds,
+  nodeStylesRef,
+  pushUndoAndSet,
+  capabilitiesRef,
+}: {
+  label: string;
+  type: "fill" | "border";
+  selectedNodeIds: Set<string>;
+  nodeStylesRef: React.MutableRefObject<Record<string, NodeStylePatch>>;
+  pushUndoAndSet: (caps: Capability[], styles: Record<string, NodeStylePatch>) => void;
+  capabilitiesRef: React.MutableRefObject<Capability[]>;
+}) {
+  const legend = useCatalogStore((s) => s.legend);
+  const setLegend = useCatalogStore((s) => s.setLegend);
+  const entries = type === "fill" ? legend.fill : legend.border;
+
+  const applyColor = (color: string) => {
+    const next = { ...nodeStylesRef.current };
+    selectedNodeIds.forEach((id) => { next[id] = { ...next[id], [type]: color }; });
+    pushUndoAndSet(capabilitiesRef.current, next);
+  };
+
+  const updateEntryColor = (id: string, newColor: string) => {
+    const updated = entries.map((e) => (e.id === id ? { ...e, color: newColor } : e));
+    if (type === "fill") setLegend({ ...legend, fill: updated });
+    else setLegend({ ...legend, border: updated });
+    applyColor(newColor);
+  };
+
+  const updateEntryLabel = (id: string, newLabel: string) => {
+    const updated = entries.map((e) => (e.id === id ? { ...e, label: newLabel } : e));
+    if (type === "fill") setLegend({ ...legend, fill: updated });
+    else setLegend({ ...legend, border: updated });
+  };
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-medium text-slate-500">{label}</label>
+      <ul className="space-y-1">
+        {entries.map((e) => (
+          <li key={e.id} className="group flex items-center gap-2">
+            <label className="relative cursor-pointer">
+              <span
+                className="block h-3.5 w-3.5 flex-shrink-0 rounded-sm border border-slate-200"
+                style={{ background: e.color }}
+              />
+              <input
+                type="color"
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                value={e.color}
+                onChange={(ev) => updateEntryColor(e.id, ev.target.value)}
+              />
+            </label>
+            {editingId === e.id ? (
+              <input
+                autoFocus
+                className="min-w-0 flex-1 rounded border border-slate-200 bg-white px-1 text-[11px] text-slate-700 outline-none focus:border-brand-400"
+                value={e.label}
+                onChange={(ev) => updateEntryLabel(e.id, ev.target.value)}
+                onBlur={() => setEditingId(null)}
+                onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === "Escape") setEditingId(null); }}
+              />
+            ) : (
+              <>
+                <button
+                  onClick={() => applyColor(e.color)}
+                  className="min-w-0 flex-1 truncate text-left text-[11px] text-slate-600 transition hover:text-brand-700"
+                >
+                  {e.label}
+                </button>
+                <button
+                  onClick={() => setEditingId(e.id)}
+                  className="hidden h-4 w-4 flex-shrink-0 items-center justify-center rounded text-slate-300 transition hover:text-slate-600 group-hover:flex"
+                  title="Rename"
+                >
+                  <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                  </svg>
+                </button>
+              </>
+            )}
+          </li>
+        ))}
+        {/* Custom color */}
+        <li className="flex items-center gap-2">
+          <label className="relative cursor-pointer">
+            <span className="block h-3.5 w-3.5 flex-shrink-0 rounded-sm border border-dashed border-slate-300 bg-white" />
+            <input
+              type="color"
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              defaultValue={type === "fill" ? "#ffffff" : "#e2e8f0"}
+              onChange={(ev) => applyColor(ev.target.value)}
+            />
+          </label>
+          <span className="text-[11px] text-slate-500">Custom…</span>
+        </li>
+      </ul>
+    </div>
+  );
+}
 
 export default function DashboardCanvasPage() {
   return (
@@ -1170,42 +1279,24 @@ function DashboardContent() {
                 </div>
 
                 {/* Background colour */}
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-slate-500">Background colour</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      defaultValue="#ffffff"
-                      onChange={(e) => {
-                        const fill = e.target.value;
-                        const next = { ...nodeStylesRef.current };
-                        selectedNodeIds.forEach((id) => { next[id] = { ...next[id], fill }; });
-                        pushUndoAndSet(capabilitiesRef.current, next);
-                      }}
-                      className="h-8 w-10 cursor-pointer rounded border border-slate-200 p-0.5"
-                    />
-                    <span className="text-xs text-slate-400">Apply to all selected</span>
-                  </div>
-                </div>
+                <MultiSelectColorPicker
+                  label="Background colour"
+                  type="fill"
+                  selectedNodeIds={selectedNodeIds}
+                  nodeStylesRef={nodeStylesRef}
+                  pushUndoAndSet={pushUndoAndSet}
+                  capabilitiesRef={capabilitiesRef}
+                />
 
                 {/* Border colour */}
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-slate-500">Border colour</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      defaultValue="#e2e8f0"
-                      onChange={(e) => {
-                        const border = e.target.value;
-                        const next = { ...nodeStylesRef.current };
-                        selectedNodeIds.forEach((id) => { next[id] = { ...next[id], border }; });
-                        pushUndoAndSet(capabilitiesRef.current, next);
-                      }}
-                      className="h-8 w-10 cursor-pointer rounded border border-slate-200 p-0.5"
-                    />
-                    <span className="text-xs text-slate-400">Apply to all selected</span>
-                  </div>
-                </div>
+                <MultiSelectColorPicker
+                  label="Border colour"
+                  type="border"
+                  selectedNodeIds={selectedNodeIds}
+                  nodeStylesRef={nodeStylesRef}
+                  pushUndoAndSet={pushUndoAndSet}
+                  capabilitiesRef={capabilitiesRef}
+                />
 
                 {/* Parent */}
                 <div>

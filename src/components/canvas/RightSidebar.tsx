@@ -26,79 +26,128 @@ const LEVEL_BORDER_DEFAULTS: Record<number, string> = {
 };
 
 // ── ColorCategoryPicker ──────────────────────────────────────────────────────
-// Shows legend categories as swatches + "Custom" raw picker fallback
+// Shows legend categories as a vertical list (matching left sidebar legend format)
+// Clicking the colored square opens a native color picker for that entry.
+// Labels are editable inline, matching left sidebar behavior.
 function ColorCategoryPicker({
   label,
   value,
   entries,
   defaultColor,
   onChange,
+  onUpdateEntries,
 }: {
   label: string;
   value: string | undefined;
   entries: LegendEntry[];
   defaultColor: string;
   onChange: (color: string) => void;
+  onUpdateEntries?: (entries: LegendEntry[]) => void;
 }) {
   const currentColor = value || defaultColor;
   const matched = entries.find((e) => e.color.toLowerCase() === currentColor.toLowerCase());
 
+  const updateEntryLabel = (id: string, newLabel: string) => {
+    if (!onUpdateEntries) return;
+    onUpdateEntries(entries.map((e) => (e.id === id ? { ...e, label: newLabel } : e)));
+  };
+
+  const updateEntryColor = (id: string, newColor: string) => {
+    if (!onUpdateEntries) return;
+    onUpdateEntries(entries.map((e) => (e.id === id ? { ...e, color: newColor } : e)));
+    onChange(newColor);
+  };
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   return (
     <div>
       <span className="block text-slate-400">{label}</span>
-      <div className="mt-1.5 flex flex-wrap gap-1.5">
+      <ul className="mt-1.5 space-y-1">
         {entries.map((e) => {
           const active = e.color.toLowerCase() === currentColor.toLowerCase();
           return (
-            <button
-              key={e.id}
-              title={e.label}
-              onClick={() => onChange(e.color)}
-              className={`group relative flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md border-2 transition ${
-                active ? "border-slate-700 scale-110" : "border-transparent hover:border-slate-300"
-              }`}
-              style={{ background: e.color }}
-            >
-              {active && (
-                <svg className="h-3 w-3 text-white drop-shadow" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor">
+            <li key={e.id} className="group flex items-center gap-2">
+              {/* Color swatch — click to open native color picker */}
+              <label className="relative cursor-pointer">
+                <span
+                  className={`block h-3.5 w-3.5 flex-shrink-0 rounded-sm border ${
+                    active ? "border-brand-500" : "border-slate-200"
+                  }`}
+                  style={{ background: e.color }}
+                />
+                <input
+                  type="color"
+                  className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                  value={e.color}
+                  onChange={(ev) => updateEntryColor(e.id, ev.target.value)}
+                />
+              </label>
+              {/* Label: click to apply color, pencil icon to rename */}
+              {editingId === e.id ? (
+                <input
+                  autoFocus
+                  className="min-w-0 flex-1 rounded border border-slate-200 bg-white px-1 text-[11px] text-slate-700 outline-none focus:border-brand-400"
+                  value={e.label}
+                  onChange={(ev) => updateEntryLabel(e.id, ev.target.value)}
+                  onBlur={() => setEditingId(null)}
+                  onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === "Escape") setEditingId(null); }}
+                />
+              ) : (
+                <>
+                  <button
+                    onClick={() => onChange(e.color)}
+                    className={`min-w-0 flex-1 truncate text-left text-[11px] transition hover:text-brand-700 ${
+                      active ? "font-semibold text-brand-700" : "text-slate-600"
+                    }`}
+                  >
+                    {e.label}
+                  </button>
+                  <button
+                    onClick={() => setEditingId(e.id)}
+                    className="hidden h-4 w-4 flex-shrink-0 items-center justify-center rounded text-slate-300 transition hover:text-slate-600 group-hover:flex"
+                    title="Rename"
+                  >
+                    <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                    </svg>
+                  </button>
+                </>
+              )}
+              {active && editingId !== e.id && (
+                <svg className="h-3 w-3 flex-shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                 </svg>
               )}
-              {/* Tooltip */}
-              <span className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition group-hover:opacity-100 z-50">
-                {e.label}
-              </span>
-            </button>
+            </li>
           );
         })}
-        {/* Custom raw color */}
-        <label
-          title={matched ? "" : `Custom: ${currentColor}`}
-          className={`relative flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded-md border-2 transition ${
-            !matched ? "border-slate-700 scale-110" : "border-dashed border-slate-300 hover:border-slate-400"
-          }`}
-          style={{ background: !matched ? currentColor : "white" }}
-        >
-          {matched ? (
-            <svg className="h-3 w-3 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42" />
-            </svg>
-          ) : (
-            <svg className="h-3 w-3 text-white drop-shadow" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor">
+        {/* Custom color option */}
+        <li className="flex items-center gap-2">
+          <label className="relative cursor-pointer">
+            <span
+              className={`block h-3.5 w-3.5 flex-shrink-0 rounded-sm border ${
+                !matched ? "border-brand-500" : "border-dashed border-slate-300"
+              }`}
+              style={{ background: !matched ? currentColor : "#fff" }}
+            />
+            <input
+              type="color"
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              value={currentColor}
+              onChange={(ev) => onChange(ev.target.value)}
+            />
+          </label>
+          <span className={`flex-1 text-[11px] ${!matched ? "font-semibold text-brand-700" : "text-slate-500"}`}>
+            {!matched ? `Custom (${currentColor})` : "Custom…"}
+          </span>
+          {!matched && (
+            <svg className="h-3 w-3 flex-shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
             </svg>
           )}
-          <input
-            type="color"
-            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-            value={currentColor}
-            onChange={(e) => onChange(e.target.value)}
-          />
-        </label>
-      </div>
-      <p className="mt-1 text-[10px] text-slate-400">
-        {matched ? matched.label : `Custom (${currentColor})`}
-      </p>
+        </li>
+      </ul>
     </div>
   );
 }
@@ -326,6 +375,7 @@ export default function RightSidebar({
   } | null>(null);
 
   const legend = useCatalogStore((s) => s.legend);
+  const setLegend = useCatalogStore((s) => s.setLegend);
 
   // Reset when a different node is selected
   useEffect(() => {
@@ -510,6 +560,7 @@ export default function RightSidebar({
                 entries={legend.fill}
                 defaultColor={LEVEL_BG_DEFAULTS[data.level]}
                 onChange={(color) => onUpdateNode?.(node.id, { fill: color })}
+                onUpdateEntries={(fill) => setLegend({ ...legend, fill })}
               />
 
               {/* ── Border color ── */}
@@ -519,6 +570,7 @@ export default function RightSidebar({
                 entries={legend.border}
                 defaultColor={LEVEL_BORDER_DEFAULTS[data.level]}
                 onChange={(color) => onUpdateNode?.(node.id, { border: color })}
+                onUpdateEntries={(border) => setLegend({ ...legend, border })}
               />
 
               {/* ── Note ── */}
