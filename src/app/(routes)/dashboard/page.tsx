@@ -24,6 +24,8 @@ import AIMapEditor from "@/components/canvas/AIMapEditor";
 import AddNodeWizard from "@/components/canvas/AddNodeWizard";
 import { showToast } from "@/components/ui/Toast";
 import VersionHistoryPanel from "@/components/canvas/VersionHistoryPanel";
+import SaveAsTemplateModal from "@/components/canvas/SaveAsTemplateModal";
+import TemplatePickerModal from "@/components/ui/TemplatePickerModal";
 import { buildCanvasNodes } from "@/lib/canvas/layoutEngine";
 import { handleNodeDragDrop } from "@/lib/canvas/dragDropHandler";
 import { executeCommands } from "@/lib/commands/executor";
@@ -176,6 +178,8 @@ function DashboardContent() {
   const [error, setError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
+  const [useTemplateOpen, setUseTemplateOpen] = useState(false);
 
   // Local undo/redo stacks — in memory only, never saved to DB (max 10 steps)
   type UndoSnapshot = { capabilities: Capability[]; nodeStyles: Record<string, NodeStylePatch> };
@@ -860,22 +864,27 @@ function DashboardContent() {
         const { legend, setLegend } = useCatalogStore.getState();
         let fill = [...legend.fill];
         let border = [...legend.border];
+        let textColor = [...(legend.textColor ?? [])];
         for (const cmd of legendCmds) {
           if (cmd.type === "SET_LEGEND") {
             const entry = { id: cmd.entryId, label: cmd.label, color: cmd.color };
             if (cmd.slot === "fill") {
               const idx = fill.findIndex((e) => e.id === cmd.entryId);
               fill = idx === -1 ? [...fill, entry] : fill.map((e, i) => (i === idx ? entry : e));
+            } else if (cmd.slot === "textColor") {
+              const idx = textColor.findIndex((e) => e.id === cmd.entryId);
+              textColor = idx === -1 ? [...textColor, entry] : textColor.map((e, i) => (i === idx ? entry : e));
             } else {
               const idx = border.findIndex((e) => e.id === cmd.entryId);
               border = idx === -1 ? [...border, entry] : border.map((e, i) => (i === idx ? entry : e));
             }
           } else if (cmd.type === "REMOVE_LEGEND") {
             if (cmd.slot === "fill") fill = fill.filter((e) => e.id !== cmd.entryId);
+            else if (cmd.slot === "textColor") textColor = textColor.filter((e) => e.id !== cmd.entryId);
             else border = border.filter((e) => e.id !== cmd.entryId);
           }
         }
-        setLegend({ fill, border });
+        setLegend({ fill, border, textColor });
       }
 
       let errors: string[] = [];
@@ -1031,6 +1040,30 @@ function DashboardContent() {
           {applyError && (
             <p className="text-xs text-red-500">{applyError}</p>
           )}
+          {/* Use template */}
+          <button
+            onClick={() => setUseTemplateOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-brand-400 hover:text-brand-600"
+            title="Load a saved template onto the canvas"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" />
+            </svg>
+            Use template
+          </button>
+
+          {/* Save as Template */}
+          <button
+            onClick={() => setSaveTemplateOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-amber-400 hover:text-amber-600"
+            title="Save current diagram as a reusable template"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
+            </svg>
+            Save as template
+          </button>
+
           {/* AI map editor toggle */}
           <button
             onClick={() => {
@@ -1352,6 +1385,23 @@ function DashboardContent() {
         )}
       </div>
 
+      {/* Save as Template modal */}
+      <SaveAsTemplateModal
+        open={saveTemplateOpen}
+        onClose={() => setSaveTemplateOpen(false)}
+        capabilities={capabilities}
+        defaultName={catalogName}
+      />
+
+      {/* Use Template modal */}
+      <TemplatePickerModal
+        open={useTemplateOpen}
+        onClose={() => setUseTemplateOpen(false)}
+        onSelect={(caps, name) => {
+          pushUndoAndSet(caps);
+          useCatalogStore.setState({ catalogName: name, isDirty: true });
+        }}
+      />
 
     </div>
   );

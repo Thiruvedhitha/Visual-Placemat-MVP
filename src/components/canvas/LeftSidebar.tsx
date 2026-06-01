@@ -138,6 +138,7 @@ export default function LeftSidebar({ visibleLevels, onToggleLevel, onAddNode }:
 
   const updateFill = (fill: LegendEntry[]) => setLegend({ ...legend, fill });
   const updateBorder = (border: LegendEntry[]) => setLegend({ ...legend, border });
+  const updateTextColor = (textColor: LegendEntry[]) => setLegend({ ...legend, textColor });
 
   useEffect(() => {
     fetch("/api/clients")
@@ -279,8 +280,9 @@ export default function LeftSidebar({ visibleLevels, onToggleLevel, onAddNode }:
         </button>
         {legendOpen && (
           <>
-            <LegendSection title="Background" entries={legend.fill} onUpdate={updateFill} />
+            <LegendSection title="Maturity Levels" entries={legend.fill} onUpdate={updateFill} />
             <LegendSection title="Border" entries={legend.border} onUpdate={updateBorder} />
+            <LegendSection title="Text Color" entries={legend.textColor ?? []} onUpdate={updateTextColor} />
           </>
         )}
       </div>

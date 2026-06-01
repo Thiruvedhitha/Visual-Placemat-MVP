@@ -73,8 +73,8 @@ export type DiagramCommand =
    */
   | {
       type: "SET_LEGEND";
-      /** "fill" = background colour legend; "border" = border colour legend */
-      slot: "fill" | "border";
+      /** "fill" = background colour legend; "border" = border colour legend; "textColor" = text colour legend */
+      slot: "fill" | "border" | "textColor";
       /** Stable short ID for this entry, e.g. "we-have" or "in-progress" */
       entryId: string;
       /** Human-readable label shown in the legend, e.g. "We have" */
@@ -88,15 +88,23 @@ export type DiagramCommand =
    */
   | {
       type: "REMOVE_LEGEND";
-      /** "fill" or "border" slot the entry lives in */
-      slot: "fill" | "border";
+      /** "fill", "border", or "textColor" slot the entry lives in */
+      slot: "fill" | "border" | "textColor";
       /** entryId of the entry to remove */
       entryId: string;
     }
+  /** Change the text/label colour of a node */
+  | {
+      type: "SET_TEXT_COLOR";
+      /** Capability ID (uuid) */
+      nodeId: string;
+      /** CSS hex color e.g. "#ffffff" */
+      color: string;
+    }
   /**
-   * Reset a node's fill and/or border back to the level default (removes the override).
+   * Reset a node's fill and/or border and/or text color back to the level default (removes the override).
    * Use when the user says "remove color", "reset", "clear color", "restore default".
-   * Omit fill/border flags to reset both; set only the one(s) to clear.
+   * Omit fill/border/textColor flags to reset all; set only the one(s) to clear.
    */
   | {
       type: "RESET_STYLE";
@@ -105,12 +113,15 @@ export type DiagramCommand =
       fill?: boolean;
       /** true = clear the border override (restore level default border) */
       border?: boolean;
+      /** true = clear the text color override (restore level default text color) */
+      textColor?: boolean;
     };
 
 /** Keyed by nodeId; merged into ReactFlow node.data on the canvas */
 export type NodeStylePatch = {
   fill?: string;
   border?: string;
+  textColor?: string;
   note?: string;
   description?: string;
 };

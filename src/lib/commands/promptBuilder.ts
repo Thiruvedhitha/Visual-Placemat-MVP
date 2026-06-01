@@ -2,7 +2,7 @@ import type { Capability } from "@/types/capability";
 import type { NodeStylePatch } from "./index";
 
 type LegendEntry = { id: string; label: string; color: string };
-type LegendConfig = { fill: LegendEntry[]; border: LegendEntry[] };
+type LegendConfig = { fill: LegendEntry[]; border: LegendEntry[]; textColor: LegendEntry[] };
 
 /**
  * Builds the Anthropic system prompt that instructs the LLM what commands
@@ -61,21 +61,27 @@ Reply with ONLY a JSON object in this exact shape:
 8. RESET_STYLE — remove a node's colour override and restore the level default colour
 { "type": "RESET_STYLE", "nodeId": "<uuid>" }
    Also supports partial reset:
-   { "type": "RESET_STYLE", "nodeId": "<uuid>", "fill": true }   ← clears only background
-   { "type": "RESET_STYLE", "nodeId": "<uuid>", "border": true } ← clears only border
-   Use this when the user says "remove color", "reset color", "clear color", "restore default", "remove background", "clear fill", "remove border color".
+   { "type": "RESET_STYLE", "nodeId": "<uuid>", "fill": true }      ← clears only background
+   { "type": "RESET_STYLE", "nodeId": "<uuid>", "border": true }    ← clears only border
+   { "type": "RESET_STYLE", "nodeId": "<uuid>", "textColor": true } ← clears only text color
+   Use this when the user says "remove color", "reset color", "clear color", "restore default", "remove background", "clear fill", "remove border color", "reset text color".
    NEVER use SET_STYLE with "#ffffff" or "transparent" to simulate a reset — always use RESET_STYLE.
 
 9. SET_LEGEND — create or update a colour-legend category in the sidebar
-{ "type": "SET_LEGEND", "slot": "fill"|"border", "entryId": "<short-slug>", "label": "<human label>", "color": "#rrggbb" }
-   Use "fill" slot for background colours, "border" slot for border colours.
-   entryId must be a short lowercase slug (e.g. "we-have", "not-there", "in-progress").
+{ "type": "SET_LEGEND", "slot": "fill"|"border"|"textColor", "entryId": "<short-slug>", "label": "<human label>", "color": "#rrggbb" }
+   Use "fill" slot for background colours, "border" slot for border colours, "textColor" slot for text/label colours.
+   entryId must be a short lowercase slug (e.g. "we-have", "not-there", "in-progress", "white-text").
    If an entry with the same entryId already exists it will be updated; otherwise a new entry is created.
 
 10. REMOVE_LEGEND — delete a colour-legend category from the sidebar
-{ "type": "REMOVE_LEGEND", "slot": "fill"|"border", "entryId": "<entry-id-to-remove>" }
+{ "type": "REMOVE_LEGEND", "slot": "fill"|"border"|"textColor", "entryId": "<entry-id-to-remove>" }
    Use the entryId exactly as it appears in the Current Legend section below.
    Use this when the user says "remove", "delete", or "clear" a legend category.
+
+11. SET_TEXT_COLOR — change the text/label colour of a node
+{ "type": "SET_TEXT_COLOR", "nodeId": "<uuid>", "color": "#rrggbb" }
+   Use this when the user says "change text color", "set label color", "make text white", "dark text", etc.
+   Also supports partial reset of text color via RESET_STYLE with "textColor": true.
 
 ## Legend rules — CRITICAL, FOLLOW EXACTLY
 
@@ -150,7 +156,7 @@ function buildLegendSection(legend?: LegendConfig): string {
   const allUsed = new Set<string>();
   const lines: string[] = ["## Current Legend"];
 
-  if (!legend || (legend.fill.length === 0 && legend.border.length === 0)) {
+  if (!legend || (legend.fill.length === 0 && legend.border.length === 0 && (legend.textColor ?? []).length === 0)) {
     lines.push("(empty — no categories defined yet)");
   } else {
     if (legend.fill.length > 0) {
@@ -163,6 +169,13 @@ function buildLegendSection(legend?: LegendConfig): string {
     if (legend.border.length > 0) {
       lines.push("Border categories:");
       legend.border.forEach((e) => {
+        lines.push(`  - entryId "${e.id}" | label "${e.label}" | color ${e.color}`);
+        allUsed.add(e.color.toLowerCase());
+      });
+    }
+    if ((legend.textColor ?? []).length > 0) {
+      lines.push("Text color categories:");
+      (legend.textColor ?? []).forEach((e) => {
         lines.push(`  - entryId "${e.id}" | label "${e.label}" | color ${e.color}`);
         allUsed.add(e.color.toLowerCase());
       });
@@ -237,6 +250,10 @@ Each proposal must contain exactly one command.
 
 7. SET_DESCRIPTION — update the description of an existing node
 { "type": "SET_DESCRIPTION", "nodeId": "<uuid>", "description": "text" }
+
+8. SET_TEXT_COLOR — change the text/label colour of a node
+{ "type": "SET_TEXT_COLOR", "nodeId": "<uuid>", "color": "#rrggbb" }
+   Use this when the user says "change text color", "set label color", "make text white", "dark text", etc.
 
 ## Rules
 - Return at most 10 proposals.

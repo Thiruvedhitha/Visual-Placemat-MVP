@@ -93,6 +93,18 @@ const LEGEND_CMD_GROUPS = [
       { op: "Delete", phrase: 'remove border category [label]', example: 'remove border category "Apptio Tool"' },
     ],
   },
+  {
+    slot: "textColor" as const,
+    label: "Text color categories",
+    color: "text-amber-400",
+    borderColor: "border-amber-500/20",
+    bgColor: "bg-amber-500/5",
+    commands: [
+      { op: "Create", phrase: 'add text color [label] with [color]', example: 'add text color "Highlighted" with white' },
+      { op: "Modify", phrase: 'change [label] text colour to [color]', example: 'change "Highlighted" text to yellow' },
+      { op: "Delete", phrase: 'remove text color category [label]', example: 'remove text color category "Highlighted"' },
+    ],
+  },
 ];
 
 function LegendCommandRef() {

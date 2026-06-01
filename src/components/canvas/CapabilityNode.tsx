@@ -11,6 +11,7 @@ export interface CapabilityNodeData {
   number?: string;
   fill?: string;
   border?: string;
+  textColor?: string;
   note?: string;
   colWidth?: number;
   nodeHeight?: number;
@@ -58,6 +59,7 @@ function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
   if (data.level === 0) {
     const bgColor = data.fill || LEVEL_COLORS[0];
     const borderColor = data.border || bgColor;
+    const textColor = data.textColor || "#fff";
 
     return (
       <div
@@ -80,7 +82,7 @@ function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
         <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
         <span
           style={{
-            color: "#fff",
+            color: textColor,
             fontWeight: 800,
             fontSize: "15px",
             textTransform: "uppercase",
@@ -102,6 +104,7 @@ function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
   if (data.level === 1) {
     const headerColor = data.fill || LEVEL_COLORS[1];
     const borderColor = data.border || headerColor;
+    const textColor = data.textColor || "#fff";
 
     return (
       <div
@@ -127,7 +130,7 @@ function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
         {/* Header text on blue background */}
         <div
           style={{
-            color: "#fff",
+            color: textColor,
             padding: "12px 12px",
             textAlign: "center",
             fontWeight: 700,
@@ -150,6 +153,7 @@ function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
   if (data.level === 2) {
     const bgColor = data.fill || LEVEL_COLORS[2];
     const borderColor = data.border || bgColor;
+    const textColor = data.textColor || "#0f1b2d";
 
     return (
       <div
@@ -174,7 +178,7 @@ function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
         {/* Header */}
         <div
           style={{
-            color: "#0f1b2d",
+            color: textColor,
             padding: "10px 10px",
             textAlign: "center",
             fontWeight: 700,
@@ -204,7 +208,7 @@ function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
         height: height ? `${height}px` : "auto",
         fontSize: "11px",
         fontWeight: 600,
-        color: "#1a1a2e",
+        color: data.textColor || "#1a1a2e",
         lineHeight: 1.3,
         textAlign: "center",
         display: "flex",

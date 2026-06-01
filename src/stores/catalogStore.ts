@@ -14,11 +14,13 @@ export interface LegendEntry {
 export interface LegendConfig {
   fill: LegendEntry[];
   border: LegendEntry[];
+  textColor: LegendEntry[];
 }
 
 const DEFAULT_LEGEND: LegendConfig = {
   fill: [],
   border: [],
+  textColor: [],
 };
 
 export interface CatalogState {

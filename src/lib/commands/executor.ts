@@ -48,6 +48,20 @@ export function executeCommands(
         break;
       }
 
+      case "SET_TEXT_COLOR": {
+        const cap = current.find((c) => c.id === cmd.nodeId);
+        if (!cap) {
+          errors.push(`SET_TEXT_COLOR: node "${cmd.nodeId}" not found`);
+          break;
+        }
+        nodePatches[cmd.nodeId] = {
+          ...(nodePatches[cmd.nodeId] ?? {}),
+          textColor: cmd.color,
+        };
+        messages.push(`Text color updated on "${cap.name}"`);
+        break;
+      }
+
       case "RESET_STYLE": {
         const cap = current.find((c) => c.id === cmd.nodeId);
         if (!cap) {
@@ -56,9 +70,11 @@ export function executeCommands(
         }
         const resetFill = cmd.fill !== false; // default true
         const resetBorder = cmd.border !== false; // default true
+        const resetTextColor = cmd.textColor !== false; // default true
         const existing = { ...(nodePatches[cmd.nodeId] ?? {}) };
         if (resetFill) delete existing.fill;
         if (resetBorder) delete existing.border;
+        if (resetTextColor) delete existing.textColor;
         nodePatches[cmd.nodeId] = existing;
         messages.push(`Style reset on "${cap.name}"`);
         break;
