@@ -3,6 +3,25 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Capability } from "@/types/capability";
+import type { NodeStylePatch } from "@/lib/commands/index";
+
+export interface LegendEntry {
+  id: string;
+  label: string;
+  color: string; // hex
+}
+
+export interface LegendConfig {
+  fill: LegendEntry[];
+  border: LegendEntry[];
+  textColor: LegendEntry[];
+}
+
+const DEFAULT_LEGEND: LegendConfig = {
+  fill: [],
+  border: [],
+  textColor: [],
+};
 
 export interface CatalogState {
   /** null = never saved to DB */
@@ -11,6 +30,10 @@ export interface CatalogState {
   industry: string | null;
   capabilities: Capability[];
   isDirty: boolean;
+  /** Per-node visual overrides (fill, border) — keyed by node ID */
+  nodeStyles: Record<string, NodeStylePatch>;
+  /** Color legend — fill and border category definitions */
+  legend: LegendConfig;
 }
 
 export interface CatalogActions {
@@ -33,8 +56,20 @@ export interface CatalogActions {
   /** Mark store as dirty (after any local edit) */
   markDirty: () => void;
 
-  /** Replace capabilities array (e.g. after edit) */
+  /** Sync capabilities from the canvas (no undo tracking — managed locally in dashboard) */
   setCapabilities: (capabilities: Capability[]) => void;
+
+  /** Rename a single capability in the store */
+  renameCapability: (id: string, newName: string) => void;
+
+  /** Update or merge node styles */
+  setNodeStyles: (styles: Record<string, NodeStylePatch>) => void;
+
+  /** Patch a single node's styles */
+  patchNodeStyle: (id: string, patch: Partial<NodeStylePatch>) => void;
+
+  /** Replace the entire legend config */
+  setLegend: (legend: LegendConfig) => void;
 }
 
 const initialState: CatalogState = {
@@ -43,6 +78,8 @@ const initialState: CatalogState = {
   industry: null,
   capabilities: [],
   isDirty: false,
+  nodeStyles: {},
+  legend: DEFAULT_LEGEND,
 };
 
 export const useCatalogStore = create<CatalogState & CatalogActions>()(
@@ -76,9 +113,36 @@ export const useCatalogStore = create<CatalogState & CatalogActions>()(
 
       setCapabilities: (capabilities) =>
         set({ capabilities, isDirty: true }),
+
+      renameCapability: (id, newName) =>
+        set((state) => ({
+          capabilities: state.capabilities.map((c) =>
+            c.id === id ? { ...c, name: newName } : c
+          ),
+          isDirty: true,
+        })),
+      setNodeStyles: (styles) =>
+        set({ nodeStyles: styles, isDirty: true }),
+
+      patchNodeStyle: (id, patch) =>
+        set((state) => ({
+          nodeStyles: {
+            ...state.nodeStyles,
+            [id]: { ...state.nodeStyles[id], ...patch },
+          },
+          isDirty: true,
+        })),
+
+      setLegend: (legend) => set({ legend }),
     }),
     {
       name: "visual-placemat-catalog",
+      version: 2,
+      migrate: (persisted: unknown) => {
+        // v1 → v2: clear pre-defined legend defaults so legend starts blank
+        const state = persisted as Partial<CatalogState>;
+        return { ...state, legend: DEFAULT_LEGEND };
+      },
     }
   )
 );

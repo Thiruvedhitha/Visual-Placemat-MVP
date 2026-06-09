@@ -1,5 +1,5 @@
 import EntryCards from "@/components/ui/EntryCards";
-import RecentDiagrams from "@/components/ui/RecentDiagrams";
+import ClientFolders from "@/components/ui/ClientFolders";
 import HowItWorks from "@/components/ui/HowItWorks";
 import Footer from "@/components/layout/Footer";
 
@@ -47,9 +47,9 @@ export default function HomePage() {
         <EntryCards />
       </section>
 
-      {/* ── Recent maps ── */}
-      <section className="mx-auto max-w-5xl px-4 pt-16 sm:px-6 lg:px-8">
-        <RecentDiagrams />
+      {/* ── Client folders ── */}
+      <section className="mx-auto max-w-5xl px-4 pb-4 pt-16 sm:px-6 lg:px-8">
+        <ClientFolders />
       </section>
 
       {/* ── How it works ── */}

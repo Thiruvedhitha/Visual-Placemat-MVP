@@ -1,14 +1,28 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useRef, useCallback, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import ReactFlow, { ReactFlowProvider } from "reactflow";
+import "reactflow/dist/style.css";
+import { toPng } from "html-to-image";
+import { saveAs } from "file-saver";
+import { jsPDF } from "jspdf";
+import * as XLSX from "xlsx";
+import { useCatalogStore } from "@/stores/catalogStore";
+import { buildCanvasNodes } from "@/lib/canvas/layoutEngine";
+import CapabilityNode from "@/components/canvas/CapabilityNode";
+import { showToast } from "@/components/ui/Toast";
+
+const NODE_TYPES = { capability: CapabilityNode };
+const ALL_LEVELS = new Set([0, 1, 2, 3]);
 
 type ExportOption = {
   title: string;
   description: string;
   tag: string;
   actionLabel: string;
+  format: "png" | "svg" | "pdf" | "json" | "csv" | "xlsx" | "view-link" | "duplicate-link";
 };
 
 type ExportSection = {
@@ -29,12 +43,14 @@ const EXPORT_SECTIONS: ExportSection[] = [
         description: "Create a shareable read-only URL to the current diagram.",
         tag: "Link",
         actionLabel: "Create View Link",
+        format: "view-link",
       },
       {
         title: "Duplicate Link",
         description: "Open as an editable copy so teammates can branch independently.",
         tag: "Copy",
         actionLabel: "Create Duplicate Link",
+        format: "duplicate-link",
       },
     ],
   },
@@ -48,18 +64,21 @@ const EXPORT_SECTIONS: ExportSection[] = [
         description: "Raster image export for slides, docs, and chat sharing.",
         tag: "Image",
         actionLabel: "Export PNG",
+        format: "png",
       },
       {
         title: "SVG",
         description: "Scalable vector export for high-fidelity design workflows.",
         tag: "Vector",
         actionLabel: "Export SVG",
+        format: "svg",
       },
       {
         title: "PDF",
         description: "Page-friendly export for executive reviews and printing.",
         tag: "Document",
         actionLabel: "Export PDF",
+        format: "pdf",
       },
     ],
   },
@@ -73,18 +92,21 @@ const EXPORT_SECTIONS: ExportSection[] = [
         description: "Export full node, edge, and layout payload for re-import.",
         tag: "Schema",
         actionLabel: "Export JSON",
+        format: "json",
       },
       {
         title: "CSV",
         description: "Flat tabular export for spreadsheet and BI workflows.",
         tag: "Table",
         actionLabel: "Export CSV",
+        format: "csv",
       },
       {
         title: "Excel",
         description: "Workbook export preserving hierarchy columns and metadata.",
         tag: "XLSX",
         actionLabel: "Export Excel",
+        format: "xlsx",
       },
     ],
   },
@@ -99,7 +121,9 @@ export default function ExportPage() {
         </div>
       }
     >
-      <ExportContent />
+      <ReactFlowProvider>
+        <ExportContent />
+      </ReactFlowProvider>
     </Suspense>
   );
 }
@@ -107,9 +131,305 @@ export default function ExportPage() {
 function ExportContent() {
   const searchParams = useSearchParams();
   const catalogId = searchParams.get("catalogId");
+  const capabilities = useCatalogStore((s) => s.capabilities);
+  const catalogName = useCatalogStore((s) => s.catalogName);
+  const storeCatalogId = useCatalogStore((s) => s.catalogId);
+  const nodeStyles = useCatalogStore((s) => s.nodeStyles);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [exporting, setExporting] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState<string | null>(null);
+
+  // Build nodes from store and apply persisted nodeStyles
+  const nodes = buildCanvasNodes(capabilities, ALL_LEVELS).map((n) => {
+    const styles = nodeStyles[n.id];
+    if (styles) {
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          fill: styles.fill ?? n.data.fill,
+          border: styles.border ?? n.data.border,
+        },
+      };
+    }
+    return n;
+  });
+
+  // Calculate canvas bounds for proper export
+  const getBounds = useCallback(() => {
+    if (!nodes.length) return { width: 800, height: 600 };
+    let maxX = 0, maxY = 0;
+    for (const n of nodes) {
+      const w = n.data.colWidth ?? n.data.nodeWidth ?? 190;
+      const h = n.data.nodeHeight ?? 44;
+      maxX = Math.max(maxX, n.position.x + w);
+      maxY = Math.max(maxY, n.position.y + h);
+    }
+    return { width: maxX + 80, height: maxY + 40 };
+  }, [nodes]);
+
+  const handleExport = useCallback(async (format: string) => {
+    // Handle link-based exports (no canvas needed)
+    if (format === "view-link") {
+      const id = storeCatalogId || catalogId;
+      if (!id) {
+        showToast.error("Please save the catalog first (click Apply on the canvas) before creating a view link.");
+        return;
+      }
+      const viewUrl = `${window.location.origin}/view?catalogId=${encodeURIComponent(id)}`;
+      await navigator.clipboard.writeText(viewUrl);
+      setCopiedLink("view-link");
+      setTimeout(() => setCopiedLink(null), 3000);
+      return;
+    }
+    if (format === "duplicate-link") {
+      const id = storeCatalogId || catalogId;
+      if (!id) {
+        showToast.error("Please save the catalog first (click Apply on the canvas) before creating a duplicate link.");
+        return;
+      }
+      const dupUrl = `${window.location.origin}/dashboard?catalogId=${encodeURIComponent(id)}`;
+      await navigator.clipboard.writeText(dupUrl);
+      setCopiedLink("duplicate-link");
+      setTimeout(() => setCopiedLink(null), 3000);
+      return;
+    }
+
+    if (!canvasRef.current) return;
+    setExporting(format);
+
+    // Give ReactFlow a moment to ensure nodes are fully painted
+    await new Promise((r) => setTimeout(r, 500));
+
+    try {
+      const flowEl = canvasRef.current.querySelector(".react-flow__viewport") as HTMLElement;
+      if (!flowEl) throw new Error("Canvas not found");
+
+      const { width, height } = getBounds();
+      const baseName = catalogName || "capability-map";
+
+      if (format === "png") {
+        const dataUrl = await toPng(flowEl, {
+          backgroundColor: "#f8fafc",
+          width,
+          height,
+          style: {
+            transform: "translate(30px, 20px) scale(1)",
+            transformOrigin: "top left",
+            width: `${width}px`,
+            height: `${height}px`,
+          },
+        });
+        // Convert data URL to blob for reliable download
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        saveAs(blob, `${baseName}.png`);
+      } else if (format === "svg") {
+        // Export as PNG embedded in SVG
+        const pngDataUrl = await toPng(flowEl, {
+          backgroundColor: "#f8fafc",
+          width,
+          height,
+          style: {
+            transform: "translate(30px, 20px) scale(1)",
+            transformOrigin: "top left",
+            width: `${width}px`,
+            height: `${height}px`,
+          },
+        });
+        const svgMarkup = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+  <rect width="100%" height="100%" fill="#f8fafc"/>
+  <image width="${width}" height="${height}" xlink:href="${pngDataUrl}"/>
+</svg>`;
+        // Use File object to ensure correct extension and type
+        const file = new File([svgMarkup], `${baseName}.svg`, { type: "image/svg+xml" });
+        saveAs(file);
+      } else if (format === "pdf") {
+        // Capture at 2x resolution for sharp PDF output
+        const scale = 2;
+        const dataUrl = await toPng(flowEl, {
+          backgroundColor: "#ffffff",
+          width,
+          height,
+          pixelRatio: scale,
+          style: {
+            transform: "translate(30px, 20px) scale(1)",
+            transformOrigin: "top left",
+            width: `${width}px`,
+            height: `${height}px`,
+          },
+        });
+
+        // A4 page dimensions in mm
+        const A4_W = 297;
+        const A4_H = 210;
+        const MARGIN = 12; // mm
+        const usableW = A4_W - MARGIN * 2;
+        const usableH = A4_H - MARGIN * 2;
+
+        // Fit image within usable area preserving aspect ratio
+        const imgAspect = width / height;
+        let imgW = usableW;
+        let imgH = imgW / imgAspect;
+        if (imgH > usableH) {
+          imgH = usableH;
+          imgW = imgH * imgAspect;
+        }
+
+        // Centre on page
+        const offsetX = MARGIN + (usableW - imgW) / 2;
+        const offsetY = MARGIN + (usableH - imgH) / 2;
+
+        const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+        pdf.setFillColor(255, 255, 255);
+        pdf.rect(0, 0, A4_W, A4_H, "F");
+
+        // Title bar at top
+        pdf.setFillColor(15, 27, 45); // #0f1b2d navy
+        pdf.rect(0, 0, A4_W, 10, "F");
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFontSize(9);
+        pdf.setFont("helvetica", "bold");
+        pdf.text(baseName, MARGIN, 6.5);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(7);
+        pdf.text(new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }), A4_W - MARGIN, 6.5, { align: "right" });
+
+        // Add the capability map image
+        pdf.addImage(dataUrl, "PNG", offsetX, offsetY + 4, imgW, imgH - 4);
+
+        // Footer
+        pdf.setFillColor(248, 250, 252);
+        pdf.rect(0, A4_H - 7, A4_W, 7, "F");
+        pdf.setTextColor(100, 116, 139);
+        pdf.setFontSize(6);
+        pdf.text("Generated by Visual Placemat", A4_W / 2, A4_H - 2.5, { align: "center" });
+
+        pdf.save(`${baseName}.pdf`);
+      } else if (format === "json") {
+        const json = JSON.stringify(capabilities, null, 2);
+        const blob = new Blob([json], { type: "application/json" });
+        saveAs(blob, `${baseName}.json`);
+      } else if (format === "csv" || format === "xlsx") {
+        // Build hierarchical rows — show parent names only on first occurrence
+        const l0s = capabilities.filter((c) => c.level === 0).sort((a, b) => a.sort_order - b.sort_order);
+
+        const rows: { l0: string; l1: string; l2: string; l3: string; description: string }[] = [];
+
+        for (const l0 of l0s) {
+          let l0Shown = false;
+          const l1s = capabilities.filter((c) => c.level === 1 && c.parent_id === l0.id).sort((a, b) => a.sort_order - b.sort_order);
+          if (l1s.length === 0) {
+            rows.push({ l0: l0.name, l1: "", l2: "", l3: "", description: l0.description || "" });
+            continue;
+          }
+          for (const l1 of l1s) {
+            let l1Shown = false;
+            const l2s = capabilities.filter((c) => c.level === 2 && c.parent_id === l1.id).sort((a, b) => a.sort_order - b.sort_order);
+            if (l2s.length === 0) {
+              rows.push({ l0: l0Shown ? "" : l0.name, l1: l1.name, l2: "", l3: "", description: l1.description || "" });
+              l0Shown = true;
+              continue;
+            }
+            for (const l2 of l2s) {
+              let l2Shown = false;
+              const l3s = capabilities.filter((c) => c.level === 3 && c.parent_id === l2.id).sort((a, b) => a.sort_order - b.sort_order);
+              if (l3s.length === 0) {
+                rows.push({ l0: l0Shown ? "" : l0.name, l1: l1Shown ? "" : l1.name, l2: l2.name, l3: "", description: l2.description || "" });
+                l0Shown = true;
+                l1Shown = true;
+                continue;
+              }
+              for (const l3 of l3s) {
+                rows.push({
+                  l0: l0Shown ? "" : l0.name,
+                  l1: l1Shown ? "" : l1.name,
+                  l2: l2Shown ? "" : l2.name,
+                  l3: l3.name,
+                  description: l3.description || "",
+                });
+                l0Shown = true;
+                l1Shown = true;
+                l2Shown = true;
+              }
+            }
+          }
+        }
+
+        const sheetData = [
+          ["L0 Capability Name", "L1 Capability Name", "L2 Capability Name", "L3 Capability Name", "Description"],
+          ...rows.map((r) => [r.l0, r.l1, r.l2, r.l3, r.description]),
+        ];
+
+        if (format === "csv") {
+          const csvRows = sheetData.map((row) =>
+            row.map((v) => `"${(v || "").replace(/"/g, '""')}"`).join(",")
+          );
+          const csv = csvRows.join("\n");
+          const blob = new Blob([csv], { type: "text/csv" });
+          saveAs(blob, `${baseName}.csv`);
+        } else {
+          const ws = XLSX.utils.aoa_to_sheet(sheetData);
+          // Set column widths
+          ws["!cols"] = [
+            { wch: 30 }, // L0
+            { wch: 30 }, // L1
+            { wch: 30 }, // L2
+            { wch: 30 }, // L3
+            { wch: 50 }, // Description
+          ];
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, "Capability Catalog");
+          const wbOut = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+          const blob = new Blob([wbOut], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+          saveAs(blob, `${baseName}.xlsx`);
+        }
+      }
+    } catch (err) {
+      console.error("Export failed:", err);
+      showToast.error("Export failed. Please try again.");
+    } finally {
+      setExporting(null);
+    }
+  }, [capabilities, catalogName, storeCatalogId, catalogId, getBounds]);
+
+  const { width: canvasW, height: canvasH } = getBounds();
 
   return (
     <div className="min-h-screen bg-slate-50">
+      {/* Hidden canvas for export capture — rendered but not visible */}
+      <div
+        ref={canvasRef}
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          width: canvasW,
+          height: canvasH,
+          opacity: 0,
+          pointerEvents: "none",
+          zIndex: -1,
+          overflow: "hidden",
+        }}
+      >
+        <ReactFlow
+          nodes={nodes}
+          edges={[]}
+          nodeTypes={NODE_TYPES}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable={false}
+          zoomOnScroll={false}
+          panOnDrag={false}
+          preventScrolling={false}
+          defaultViewport={{ x: 30, y: 20, zoom: 1 }}
+          minZoom={1}
+          maxZoom={1}
+          proOptions={{ hideAttribution: true }}
+        />
+      </div>
+
       <main className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
         <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
           <div className="relative bg-gradient-to-r from-navy-950 via-brand-800 to-brand-600 px-6 py-10 text-white sm:px-10">
@@ -160,9 +480,21 @@ function ExportContent() {
                       <p className="min-h-12 text-xs leading-relaxed text-slate-500">{option.description}</p>
                       <button
                         type="button"
-                        className="mt-4 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-brand-300 hover:text-brand-700"
+                        onClick={() => handleExport(option.format)}
+                        disabled={exporting !== null}
+                        className={`mt-4 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold transition ${
+                          exporting === option.format
+                            ? "cursor-wait border-brand-300 text-brand-600"
+                            : copiedLink === option.format
+                            ? "border-green-300 text-green-600"
+                            : "text-slate-600 hover:border-brand-300 hover:text-brand-700"
+                        }`}
                       >
-                        {option.actionLabel}
+                        {exporting === option.format
+                          ? "Exporting…"
+                          : copiedLink === option.format
+                          ? "✓ Link Copied!"
+                          : option.actionLabel}
                       </button>
                     </div>
                   ))}

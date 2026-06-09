@@ -17,6 +17,7 @@ export interface Capability {
   level: 0 | 1 | 2 | 3;
   name: string;
   description: string | null;
+  note: string | null;
   sort_order: number;
   source: string;
   is_deleted: boolean;
