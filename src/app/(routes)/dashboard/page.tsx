@@ -384,7 +384,7 @@ function DashboardContent() {
           if (next.has(node.id)) next.delete(node.id);
           else next.add(node.id);
           // Keep selectedNodeId as last single-selected node (for right sidebar)
-          if (next.size === 1) setSelectedNodeId([...next][0]);
+          if (next.size === 1) setSelectedNodeId(Array.from(next)[0]);
           else setSelectedNodeId(null);
           return next;
         });
