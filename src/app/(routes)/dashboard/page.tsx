@@ -1370,7 +1370,7 @@ function DashboardContent() {
                 {/* Delete all */}
                 <button
                   onClick={() => {
-                    const cmds: DiagramCommand[] = [...selectedNodeIds].map((id) => ({ type: "DELETE_NODE" as const, nodeId: id }));
+                    const cmds: DiagramCommand[] = Array.from(selectedNodeIds).map((id) => ({ type: "DELETE_NODE" as const, nodeId: id }));
                     applyAICommands(cmds);
                     setSelectedNodeIds(new Set());
                     setSelectedNodeId(null);
