@@ -84,17 +84,17 @@ function trimCapabilities(caps: Capability[], fullPrompt: string): Capability[] 
   // If user explicitly references a level (L0, L1, L2, L3), include ALL nodes at that level
   // plus all ancestor levels so the tree structure stays intact for the AI
   const mentionedLevels = new Set<number>();
-  for (const m of lower.matchAll(/\bl([0-3])\b/g)) {
+  Array.from(lower.matchAll(/\bl([0-3])\b/g)).forEach((m) => {
     mentionedLevels.add(Number(m[1]));
-  }
+  });
   if (mentionedLevels.size > 0) {
     // Compute the max mentioned level and include everything up to it
-    const maxLevel = Math.max(...mentionedLevels);
+    const maxLevel = Math.max(...Array.from(mentionedLevels));
     return caps.filter((c) => c.level <= maxLevel);
   }
 
   // Detect hierarchical number references in the prompt (e.g. "1.6.1.1", "2.3")
-  const numberRefs = [...lower.matchAll(/\b(\d+(?:\.\d+){1,3})\b/g)].map((m) => m[1]);
+  const numberRefs = Array.from(lower.matchAll(/\b(\d+(?:\.\d+){1,3})\b/g)).map((m) => m[1]);
   if (numberRefs.length > 0) {
     // Build number→id map for all caps (computed once)
     const numberMap = new Map<string, string>();
@@ -199,7 +199,7 @@ export async function POST(req: Request) {
     ? buildSuggestionPrompt(trimmed, nodeStyles, capabilities)
     : mode === "chat"
     ? buildChatPrompt(trimmed, nodeStyles, capabilities)
-    : buildCommandPrompt(trimmed, nodeStyles, capabilities, legend);
+    : buildCommandPrompt(trimmed, nodeStyles, capabilities, legend ? { fill: legend.fill, border: legend.border, textColor: (legend as { fill: typeof legend.fill; border: typeof legend.border; textColor?: Array<{ id: string; label: string; color: string }> }).textColor ?? [] } : undefined);
 
   // ── Request log ──────────────────────────────────────────────────────────────
   console.log("\n[AI Transform] ── Incoming request ──────────────────────");

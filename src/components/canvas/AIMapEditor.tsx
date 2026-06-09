@@ -517,7 +517,7 @@ export default function AIMapEditor({
 
       try {
         // Build history — for proposal messages, include what was accepted/declined
-        const history = messages.flatMap((m, idx) => {
+        const history: Array<{ role: "user" | "assistant"; content: string }> = messages.flatMap((m, idx): Array<{ role: "user" | "assistant"; content: string }> => {
           if (m.role === "user") return [{ role: "user" as const, content: m.text }];
           if (m.proposals && m.proposals.length > 0) {
             const pState = proposalStates[idx] ?? {};
