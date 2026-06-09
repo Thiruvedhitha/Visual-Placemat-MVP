@@ -51,3 +51,32 @@ export async function GET(
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+/**
+ * PATCH /api/catalogs/[id]
+ * Body: { isBuiltin: boolean }
+ * Promotes or demotes a catalog as a built-in system template.
+ */
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const { id } = params;
+    const body = await request.json();
+
+    const clientName = body.isBuiltin === true ? "__builtin__" : null;
+
+    const { error } = await supabaseAdmin
+      .from("capability_catalogs")
+      .update({ client_name: clientName })
+      .eq("id", id);
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    return NextResponse.json({ ok: true });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
