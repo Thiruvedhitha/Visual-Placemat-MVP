@@ -1,15 +1,12 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
-import fs from "fs";
-import path from "path";
 import { buildCommandPrompt, buildSuggestionPrompt, buildChatPrompt } from "@/lib/commands/promptBuilder";
 import type { TransformRequest, DiagramCommand, ChatHistoryMessage } from "@/lib/commands/index";
 import type { Capability } from "@/types/capability";
+import { getSupabaseAdmin } from "@/lib/db/postgres/client";
 
 // ── Usage logging ──────────────────────────────────────────────────────────
-const USAGE_LOG_PATH = path.join(process.cwd(), "usage-log.json");
-
-function appendUsageLog(entry: {
+async function appendUsageLog(entry: {
   timestamp: string;
   model: string;
   mode: string;
@@ -19,13 +16,10 @@ function appendUsageLog(entry: {
   cost_usd: number;
 }) {
   try {
-    let log: typeof entry[] = [];
-    if (fs.existsSync(USAGE_LOG_PATH)) {
-      const raw = fs.readFileSync(USAGE_LOG_PATH, "utf-8");
-      log = JSON.parse(raw);
-    }
-    log.push(entry);
-    fs.writeFileSync(USAGE_LOG_PATH, JSON.stringify(log, null, 2));
+    const { error } = await getSupabaseAdmin()
+      .from("ai_usage_log")
+      .insert(entry);
+    if (error) console.warn("[Usage Log] Supabase insert error:", error.message);
   } catch (e) {
     console.warn("[Usage Log] Failed to write:", e);
   }
@@ -282,7 +276,7 @@ export async function POST(req: Request) {
         total_tokens,
         cost_usd: parseFloat(cost_usd.toFixed(6)),
       };
-      appendUsageLog(entry);
+      void appendUsageLog(entry);
       console.log(
         `[AI Transform] tokens → prompt:${prompt_tokens} completion:${completion_tokens} total:${total_tokens} cost:$${cost_usd.toFixed(5)}`
       );

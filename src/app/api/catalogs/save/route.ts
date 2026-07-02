@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/db/postgres/client";
+import { supabaseAdmin, requireServerEnv } from "@/lib/db/postgres/client";
 
 /**
  * POST /api/catalogs/save
@@ -9,6 +9,7 @@ import { supabaseAdmin } from "@/lib/db/postgres/client";
  */
 export async function POST(request: NextRequest) {
   try {
+    requireServerEnv();
     const body = await request.json();
     const { catalogId, catalogName, capabilities, nodeStyles } = body;
 
