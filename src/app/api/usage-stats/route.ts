@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSupabaseAdmin } from "@/lib/db/postgres/client";
+import { supabaseAdmin } from "@/lib/db/postgres/client";
 
 interface UsageEntry {
   timestamp: string;
@@ -12,7 +12,7 @@ interface UsageEntry {
 }
 
 export async function GET() {
-  const { data: entries, error } = await getSupabaseAdmin()
+  const { data: entries, error } = await supabaseAdmin
     .from("ai_usage_log")
     .select("timestamp, model, mode, prompt_tokens, completion_tokens, total_tokens, cost_usd")
     .order("timestamp", { ascending: true });
@@ -67,7 +67,7 @@ export async function GET() {
 }
 
 export async function DELETE() {
-  const { error } = await getSupabaseAdmin()
+  const { error } = await supabaseAdmin
     .from("ai_usage_log")
     .delete()
     .neq("id", 0); // delete all rows

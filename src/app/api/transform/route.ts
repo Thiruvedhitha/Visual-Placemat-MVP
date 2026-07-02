@@ -3,7 +3,7 @@ import OpenAI from "openai";
 import { buildCommandPrompt, buildSuggestionPrompt, buildChatPrompt } from "@/lib/commands/promptBuilder";
 import type { TransformRequest, DiagramCommand, ChatHistoryMessage } from "@/lib/commands/index";
 import type { Capability } from "@/types/capability";
-import { getSupabaseAdmin } from "@/lib/db/postgres/client";
+import { supabaseAdmin } from "@/lib/db/postgres/client";
 
 // ── Usage logging ──────────────────────────────────────────────────────────
 async function appendUsageLog(entry: {
@@ -16,7 +16,7 @@ async function appendUsageLog(entry: {
   cost_usd: number;
 }) {
   try {
-    const { error } = await getSupabaseAdmin()
+    const { error } = await supabaseAdmin
       .from("ai_usage_log")
       .insert(entry);
     if (error) console.warn("[Usage Log] Supabase insert error:", error.message);
