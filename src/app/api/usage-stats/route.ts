@@ -18,7 +18,9 @@ export async function GET() {
     .order("timestamp", { ascending: true });
 
   if (error) {
-    return NextResponse.json({ error: "Failed to fetch usage log" }, { status: 500 });
+    // Table may not exist yet — return empty state instead of crashing
+    console.warn("[Usage Stats] Supabase error:", error.message);
+    return NextResponse.json({ entries: [], summary: null, byMode: {}, byDay: {} });
   }
 
   const rows: UsageEntry[] = entries ?? [];

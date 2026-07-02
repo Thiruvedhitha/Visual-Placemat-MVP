@@ -264,7 +264,7 @@
       document.getElementById('last-refresh').textContent = 'Updated ' + new Date().toLocaleTimeString();
     } catch (e) {
       setStatus(false);
-      showError('⚠️ Cannot reach dev server at ' + BASE + ' — make sure `npm run dev` is running.');
+      showError('⚠️ Failed to load usage data from ' + BASE + '/api/usage-stats — check that the Supabase ai_usage_log table exists and the server is running.');
     }
   }
 
