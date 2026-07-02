@@ -187,8 +187,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "capabilities array is required" }, { status: 400 });
   }
 
-  // For chat mode send all capabilities (don't trim — user may ask about any node)
-  const trimmed = mode === "chat" ? capabilities : trimCapabilities(capabilities, prompt);
+  // For chat + suggest modes send all capabilities (don't trim — AI needs real IDs for every node it references)
+  const trimmed = (mode === "chat" || mode === "suggest") ? capabilities : trimCapabilities(capabilities, prompt);
   const systemPrompt = mode === "suggest"
     ? buildSuggestionPrompt(trimmed, nodeStyles, capabilities)
     : mode === "chat"

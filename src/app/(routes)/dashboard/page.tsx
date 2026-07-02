@@ -163,6 +163,7 @@ export default function DashboardCanvasPage() {
 function DashboardContent() {
   const searchParams = useSearchParams();
   const catalogIdParam = searchParams.get("catalogId");
+  const isAiMode = searchParams.get("mode") === "ai";
 
   // Zustand store
   const storeCapabilities = useCatalogStore((s) => s.capabilities);
@@ -221,7 +222,7 @@ function DashboardContent() {
     });
   }, []);
   // AI Map Editor panel state
-  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiPanelOpen, setAiPanelOpen] = useState(isAiMode);
   const [aiPickMode, setAiPickMode] = useState(false);
   const [aiTargetNodeId, setAiTargetNodeId] = useState<string | null>(null);
   // Properties sidebar — independent of AI panel
@@ -241,6 +242,14 @@ function DashboardContent() {
 
   // Load capabilities: Zustand first (if matching catalog), then DB fallback
   useEffect(() => {
+    // AI mode: always start with an empty canvas regardless of store state
+    if (isAiMode) {
+      useCatalogStore.getState().clear();
+      setCapabilities([]);
+      setLoading(false);
+      return;
+    }
+
     // If Zustand has capabilities for the same catalog, use those
     if (storeCapabilities.length > 0 && (!catalogIdParam || catalogIdParam === storeCatalogId)) {
       setCapabilities(storeCapabilities);
@@ -274,7 +283,7 @@ function DashboardContent() {
       })
       .catch(() => setError("Network error"))
       .finally(() => setLoading(false));
-  }, [catalogIdParam, storeCapabilities, storeCatalogId, loadFromDB]);
+  }, [catalogIdParam, storeCapabilities, storeCatalogId, loadFromDB, isAiMode]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -891,6 +900,9 @@ function DashboardContent() {
       const prevCaps = capabilitiesRef.current;
       const result = executeCommands(otherCmds, prevCaps, nodeStylesRef.current);
       errors = result.errors;
+      if (errors.length > 0) {
+        errors.forEach((e) => showToast.error(e));
+      }
       pushUndoAndSet(result.capabilities, result.nodePatches);
       return errors;
     },
@@ -958,7 +970,7 @@ function DashboardContent() {
     );
   }
 
-  if (error || (!catalogIdParam && capabilities.length === 0)) {
+  if (error || (!catalogIdParam && !isAiMode && capabilities.length === 0)) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-50">
         <p className="text-sm text-red-500">{error || "No catalog loaded"}</p>
