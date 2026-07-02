@@ -209,12 +209,12 @@
 </div>
 
 <footer>
-  Refresh to see new requests · Data stored locally in <code>usage-log.json</code> ·
+  Refresh to see new requests · Data stored in Supabase ·
   Prices: gpt-4.1-mini $0.40/1M input · $1.60/1M output
 </footer>
 
 <script>
-  const BASE = 'http://localhost:3000';
+  const BASE = window.location.origin;
 
   function fmt(n) {
     if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
