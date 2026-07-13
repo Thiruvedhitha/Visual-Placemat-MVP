@@ -1,6 +1,27 @@
+export interface Client {
+  id: string;
+  name: string;
+  industry: string | null;
+  description: string | null;
+  logo_url: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ClientMember {
+  id: string;
+  client_id: string;
+  user_id: string;
+  role: "admin" | "editor" | "viewer";
+  invited_by: string | null;
+  created_at: string;
+}
+
 export interface CapabilityCatalog {
   id: string;
   user_id: string | null;
+  client_id: string | null;
   name: string;
   description: string | null;
   client_name: string | null;
@@ -89,4 +110,29 @@ export interface ParsedCapabilityRow {
   l2: string | null;
   l3: string | null;
   description: string | null;
+}
+
+// ─── Legacy client folder types (used by LeftSidebar & ClientFolders UI) ────
+
+export interface RecentCommit {
+  summary: string;
+  adds: number;
+  deletes: number;
+  renames: number;
+  styles: number;
+  ts: string;
+}
+
+export interface ClientCatalog {
+  id: string;
+  name: string;
+  industry: string | null;
+  updated_at: string;
+  capability_count: number;
+  recent_commits: RecentCommit[];
+}
+
+export interface ClientFolder {
+  client_name: string;
+  catalogs: ClientCatalog[];
 }

@@ -1,10 +1,47 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import { createBrowserClient } from "@supabase/ssr";
+import type { User } from "@supabase/supabase-js";
 
 export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+    supabase.auth.getUser().then(({ data }) => setUser(data.user));
+  }, []);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
+        setProfileOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const handleSignOut = async () => {
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+    await supabase.auth.signOut();
+    window.location.href = "/login";
+  };
+
+  const initials = user?.user_metadata?.full_name
+    ? user.user_metadata.full_name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
+    : user?.email?.slice(0, 2).toUpperCase() ?? "??";
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-navy-800/20 bg-navy-950 shadow-lg">
@@ -76,9 +113,43 @@ export default function Navbar() {
 
         {/* Right section */}
         <div className="hidden items-center gap-2 sm:flex">
-          <button className="rounded-lg border border-slate-500 px-4 py-1.5 text-sm font-medium text-slate-200 hover:border-white hover:text-white">
-            Sign in
-          </button>
+          {user ? (
+            <div className="relative" ref={profileRef}>
+              <button
+                onClick={() => setProfileOpen(!profileOpen)}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-700 text-white hover:bg-slate-600 transition-colors"
+                title={user.email ?? "Profile"}
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+                </svg>
+              </button>
+              {profileOpen && (
+                <div className="absolute right-0 mt-2 w-64 rounded-lg border border-slate-700 bg-navy-900 p-4 shadow-xl z-50">
+                  <p className="text-sm font-medium text-white truncate">
+                    {user.user_metadata?.full_name || "User"}
+                  </p>
+                  <p className="text-xs text-slate-400 truncate mt-0.5">
+                    {user.email}
+                  </p>
+                  <hr className="my-3 border-slate-700" />
+                  <button
+                    onClick={handleSignOut}
+                    className="w-full rounded-md px-3 py-1.5 text-left text-sm text-red-400 hover:bg-white/10 transition-colors"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <Link
+              href="/login"
+              className="rounded-lg border border-slate-500 px-4 py-1.5 text-sm font-medium text-slate-200 hover:border-white hover:text-white"
+            >
+              Sign in
+            </Link>
+          )}
         </div>
 
         {/* Mobile hamburger */}
@@ -114,9 +185,24 @@ export default function Navbar() {
               My Works
             </Link>
             <hr className="my-1 border-navy-800/40" />
-            <button className="rounded-lg border border-slate-500 px-3 py-2 text-sm font-medium text-slate-200 hover:border-white hover:text-white">
-              Sign in
-            </button>
+            {user ? (
+              <>
+                <p className="px-3 py-1 text-xs text-slate-400 truncate">{user.email}</p>
+                <button
+                  onClick={handleSignOut}
+                  className="rounded-lg px-3 py-2 text-left text-sm font-medium text-red-400 hover:bg-white/10"
+                >
+                  Sign out
+                </button>
+              </>
+            ) : (
+              <Link
+                href="/login"
+                className="rounded-lg border border-slate-500 px-3 py-2 text-sm font-medium text-slate-200 hover:border-white hover:text-white"
+              >
+                Sign in
+              </Link>
+            )}
           </div>
         </div>
       )}

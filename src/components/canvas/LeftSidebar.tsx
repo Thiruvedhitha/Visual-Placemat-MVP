@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
-import type { ClientFolder } from "@/app/api/clients/route";
+import type { ClientFolder } from "@/types/capability";
 import { useCatalogStore } from "@/stores/catalogStore";
 import type { LegendEntry, LegendConfig } from "@/stores/catalogStore";
 
@@ -141,7 +141,7 @@ export default function LeftSidebar({ visibleLevels, onToggleLevel, onAddNode }:
   const updateTextColor = (textColor: LegendEntry[]) => setLegend({ ...legend, textColor });
 
   useEffect(() => {
-    fetch("/api/clients")
+    fetch("/api/my-works")
       .then((r) => r.json())
       .then((data: ClientFolder[]) => {
         if (Array.isArray(data)) {

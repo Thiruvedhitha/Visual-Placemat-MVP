@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Visual Placemat — Database Schema</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; color: #1e293b; padding: 40px 20px; line-height: 1.6; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    h1 { font-size: 2rem; margin-bottom: 8px; color: #0f172a; }
+    h1 span { color: #3b82f6; }
+    .subtitle { color: #64748b; margin-bottom: 40px; font-size: 0.95rem; }
+    h2 { font-size: 1.3rem; margin: 40px 0 16px; color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
+    h3 { font-size: 1rem; margin: 24px 0 8px; color: #475569; }
+
+    /* ER Diagram */
+    .er-section { display: grid; grid-template-columns: 1fr; gap: 24px; margin-bottom: 40px; }
+    @media (min-width: 768px) { .er-section { grid-template-columns: 1fr 1fr; } }
+    @media (min-width: 1024px) { .er-section.three-col { grid-template-columns: 1fr 1fr 1fr; } }
+
+    .table-card { background: #fff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: box-shadow 0.2s; }
+    .table-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .table-card .header { padding: 12px 16px; font-weight: 700; font-size: 0.85rem; color: #fff; display: flex; align-items: center; gap: 8px; }
+    .table-card .header .icon { width: 24px; height: 24px; background: rgba(255,255,255,0.2); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+    .table-card .cols { padding: 12px 16px; }
+    .table-card .col-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 0.8rem; border-bottom: 1px solid #f1f5f9; }
+    .table-card .col-row:last-child { border-bottom: none; }
+    .col-name { font-weight: 600; color: #1e293b; min-width: 120px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.75rem; }
+    .col-type { color: #64748b; font-size: 0.72rem; font-family: monospace; }
+    .col-badge { font-size: 0.6rem; padding: 2px 6px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
+    .badge-pk { background: #fef3c7; color: #92400e; }
+    .badge-fk { background: #dbeafe; color: #1e40af; }
+    .badge-unique { background: #f3e8ff; color: #6b21a8; }
+    .badge-idx { background: #dcfce7; color: #166534; }
+
+    /* Colors per group */
+    .bg-auth { background: #1e293b; }
+    .bg-client { background: #7c3aed; }
+    .bg-core { background: #2563eb; }
+    .bg-ai { background: #059669; }
+    .bg-sharing { background: #d97706; }
+
+    /* Relationship lines */
+    .rel-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.82rem; }
+    .rel-table th { background: #f1f5f9; padding: 10px 12px; text-align: left; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0; }
+    .rel-table td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; }
+    .rel-table tr:hover td { background: #f8fafc; }
+    .rel-table code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; }
+
+    /* Hierarchy */
+    .hierarchy { background: #0f172a; color: #e2e8f0; border-radius: 12px; padding: 24px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem; line-height: 1.8; overflow-x: auto; }
+    .hierarchy .l0 { color: #f97316; font-weight: 700; }
+    .hierarchy .l1 { color: #3b82f6; }
+    .hierarchy .l2 { color: #22d3ee; }
+    .hierarchy .l3 { color: #a3e635; }
+    .hierarchy .comment { color: #64748b; font-style: italic; }
+
+    /* Access control */
+    .access-flow { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; margin: 16px 0; }
+    .access-step { display: flex; align-items: flex-start; gap: 12px; margin: 12px 0; }
+    .access-step .num { width: 28px; height: 28px; background: #3b82f6; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; }
+    .access-step .desc { font-size: 0.85rem; }
+    .access-step code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; }
+
+    /* Permissions matrix */
+    .perm-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.82rem; }
+    .perm-table th { background: #f1f5f9; padding: 10px 12px; text-align: center; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0; }
+    .perm-table th:first-child { text-align: left; }
+    .perm-table td { padding: 8px 12px; text-align: center; border-bottom: 1px solid #f1f5f9; }
+    .perm-table td:first-child { text-align: left; font-weight: 500; }
+    .perm-table tr:hover td { background: #f8fafc; }
+    .check { color: #16a34a; font-weight: 700; }
+    .cross { color: #dc2626; }
+
+    /* Legend */
+    .legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; padding: 16px; background: #fff; border-radius: 8px; border: 1px solid #e2e8f0; }
+    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; }
+    .legend-dot { width: 12px; height: 12px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Visual Placemat — <span>Database Schema</span></h1>
+    <p class="subtitle">9 tables · Supabase PostgreSQL + pgvector · Row Level Security on all user-facing tables</p>
+
+    <!-- Legend -->
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#1e293b"></div> Auth (Supabase)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div> Client Management</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#2563eb"></div> Capability Map Core</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#059669"></div> AI & Audit</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#d97706"></div> Sharing & RAG</div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <h2>Client Folder Management</h2>
+    <div class="er-section">
+      <div class="table-card">
+        <div class="header bg-client"><div class="icon">📁</div> clients</div>
+        <div class="cols">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">uuid</span><span class="col-badge badge-pk">PK</span></div>
+          <div class="col-row"><span class="col-name">name</span><span class="col-type">text NOT NULL</span></div>
+          <div class="col-row"><span class="col-name">industry</span><span class="col-type">text</span></div>
+          <div class="col-row"><span class="col-name">description</span><span class="col-type">text</span></div>
+          <div class="col-row"><span class="col-name">logo_url</span><span class="col-type">text</span></div>
+          <div class="col-row"><span class="col-name">created_by</span><span class="col-type">uuid</span><span class="col-badge badge-fk">FK → auth.users</span></div>
+          <div class="col-row"><span class="col-name">created_at</span><span class="col-type">timestamptz</span></div>
+          <div class="col-row"><span class="col-name">updated_at</span><span class="col-type">timestamptz</span></div>
+        </div>
+      </div>
+      <div class="table-card">
+        <div class="header bg-client"><div class="icon">👥</div> client_members</div>
+        <div class="cols">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">uuid</span><span class="col-badge badge-pk">PK</span></div>
+          <div class="col-row"><span class="col-name">client_id</span><span class="col-type">uuid NOT NULL</span><span class="col-badge badge-fk">FK → clients</span></div>
+          <div class="col-row"><span class="col-name">user_id</span><span class="col-type">uuid NOT NULL</span><span class="col-badge badge-fk">FK → auth.users</span></div>
+          <div class="col-row"><span class="col-name">role</span><span class="col-type">text NOT NULL</span><span class="col-badge badge-unique">"admin"|"editor"|"viewer"</span></div>
+          <div class="col-row"><span class="col-name">invited_by</span><span class="col-type">uuid</span><span class="col-badge badge-fk">FK → auth.users</span></div>
+          <div class="col-row"><span class="col-name">created_at</span><span class="col-type">timestamptz</span></div>
+          <div class="col-row" style="color:#6b21a8;font-weight:600;font-size:0.72rem;">UNIQUE(client_id, user_id)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <h2>Capability Map Core</h2>
+    <div class="er-section">
+      <div class="table-card" style="grid-column: 1 / -1;">
+        <div class="header bg-core"><div class="icon">📊</div> capability_catalogs</div>
+        <div class="cols" style="display:grid; grid-template-columns: 1fr 1fr; gap: 0 24px;">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">uuid</span><span class="col-badge badge-pk">PK</span></div>
+          <div class="col-row"><span class="col-name">status</span><span class="col-type">text</span><span class="col-badge badge-unique">"active"|"archived"</span></div>
+          <div class="col-row"><span class="col-name">user_id</span><span class="col-type">uuid</span><span class="col-badge badge-fk">FK → auth.users</span></div>
+          <div class="col-row"><span class="col-name">node_styles</span><span class="col-type">jsonb</span></div>
+          <div class="col-row"><span class="col-name">client_id</span><span class="col-type">uuid</span><span class="col-badge badge-fk">FK → clients</span></div>
+          <div class="col-row"><span class="col-name">chat_history</span><span class="col-type">jsonb</span></div>
+          <div class="col-row"><span class="col-name">name</span><span class="col-type">text NOT NULL</span></div>
+          <div class="col-row"><span class="col-name">created_at</span><span class="col-type">timestamptz</span></div>
+          <div class="col-row"><span class="col-name">description</span><span class="col-type">text</span></div>
+          <div class="col-row"><span class="col-name">updated_at</span><span class="col-type">timestamptz</span></div>
+          <div class="col-row"><span class="col-name">client_name</span><span class="col-type">text</span></div>
+          <div class="col-row"></div>
+          <div class="col-row"><span class="col-name">industry</span><span class="col-type">text</span></div>
+        </div>
+      </div>
+      <div class="table-card">
+        <div class="header bg-core"><div class="icon">🔷</div> capabilities</div>
+        <div class="cols">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">uuid</span><span class="col-badge badge-pk">PK</span></div>
+          <div class="col-row"><span class="col-name">catalog_id</span><span class="col-type">uuid NOT NULL</span><span class="col-badge badge-fk">FK → catalogs</span></div>
+          <div class="col-row"><span class="col-name">parent_id</span><span class="col-type">uuid</span><span class="col-badge badge-fk">FK → self</span></div>
+          <div class="col-row"><span class="col-name">level</span><span class="col-type">smallint</span><span class="col-badge badge-unique">0 | 1 | 2 | 3</span></div>
+          <div class="col-row"><span class="col-name">name</span><span class="col-type">text NOT NULL</span></div>
+          <div class="col-row"><span class="col-name">description</span><span class="col-type">text</span></div>
+          <div class="col-row"><span class="col-name">note</span><span class="col-type">text</span></div>
+          <div class="col-row"><span class="col-name">sort_order</span><span class="col-type">integer</span><span class="col-badge badge-idx">IDX</span></div>
+          <div class="col-row"><span class="col-name">source</span><span class="col-type">text</span></div>
+          <div class="col-row"><span class="col-name">is_deleted</span><span class="col-type">boolean</span></div>
+          <div class="col-row"><span class="col-name">created_at</span><span class="col-type">timestamptz</span></div>
+          <div class="col-row"><span class="col-name">updated_at</span><span class="col-type">timestamptz</span></div>
+        </div>
+      </div>
+      <div class="table-card">
+        <div class="header bg-core"><div class="icon">🗺️</div> visual_maps</div>
+        <div class="cols">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">uuid</span><span class="col-badge badge-pk">PK</span></div>
+          <div class="col-row"><span class="col-name">catalog_id</span><span class="col-type">uuid NOT NULL</span><span class="col-badge badge-fk">FK → catalogs</span></div>
+          <div class="col-row"><span class="col-name">name</span><span class="col-type">text NOT NULL</span></div>
+          <div class="col-row"><span class="col-name">version_number</span><span class="col-type">integer</span></div>
+          <div class="col-row"><span class="col-name">layout_data</span><span class="col-type">jsonb</span></div>
+          <div class="col-row"><span class="col-name">is_active</span><span class="col-type">boolean</span><span class="col-badge badge-idx">IDX</span></div>
+          <div class="col-row"><span class="col-name">thumbnail_url</span><span class="col-type">text</span></div>
+          <div class="col-row"><span class="col-name">created_at</span><span class="col-type">timestamptz</span></div>
+          <div class="col-row"><span class="col-name">updated_at</span><span class="col-type">timestamptz</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <h2>AI & Audit</h2>
+    <div class="er-section">
+      <div class="table-card">
+        <div class="header bg-ai"><div class="icon">📝</div> diff_history</div>
+        <div class="cols">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">uuid</span><span class="col-badge badge-pk">PK</span></div>
+          <div class="col-row"><span class="col-name">catalog_id</span><span class="col-type">uuid</span><span class="col-badge badge-fk">FK → catalogs</span></div>
+          <div class="col-row"><span class="col-name">applied_by</span><span class="col-type">uuid</span><span class="col-badge badge-fk">FK → auth.users</span></div>
+          <div class="col-row"><span class="col-name">prompt_text</span><span class="col-type">text NOT NULL</span></div>
+          <div class="col-row"><span class="col-name">diff_payload</span><span class="col-type">jsonb NOT NULL</span></div>
+          <div class="col-row"><span class="col-name">status</span><span class="col-type">text</span><span class="col-badge badge-unique">"applied"|"cancelled"|"rolled_back"</span></div>
+          <div class="col-row"><span class="col-name">model_used</span><span class="col-type">text</span></div>
+          <div class="col-row"><span class="col-name">visual_map_id</span><span class="col-type">uuid</span><span class="col-badge badge-fk">FK → visual_maps</span></div>
+          <div class="col-row"><span class="col-name">created_at</span><span class="col-type">timestamptz</span></div>
+          <div class="col-row"><span class="col-name">applied_at</span><span class="col-type">timestamptz</span></div>
+        </div>
+      </div>
+      <div class="table-card">
+        <div class="header bg-ai"><div class="icon">🤖</div> prompt_sessions</div>
+        <div class="cols">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">uuid</span><span class="col-badge badge-pk">PK</span></div>
+          <div class="col-row"><span class="col-name">catalog_id</span><span class="col-type">uuid</span><span class="col-badge badge-fk">FK → catalogs</span></div>
+          <div class="col-row"><span class="col-name">user_id</span><span class="col-type">uuid</span><span class="col-badge badge-fk">FK → auth.users</span></div>
+          <div class="col-row"><span class="col-name">prompt</span><span class="col-type">text NOT NULL</span></div>
+          <div class="col-row"><span class="col-name">model_used</span><span class="col-type">text</span></div>
+          <div class="col-row"><span class="col-name">retry_count</span><span class="col-type">smallint</span></div>
+          <div class="col-row"><span class="col-name">validation_error</span><span class="col-type">text</span></div>
+          <div class="col-row"><span class="col-name">latency_ms</span><span class="col-type">integer</span></div>
+          <div class="col-row"><span class="col-name">created_at</span><span class="col-type">timestamptz</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <h2>Sharing & RAG</h2>
+    <div class="er-section">
+      <div class="table-card">
+        <div class="header bg-sharing"><div class="icon">🔗</div> catalog_shares</div>
+        <div class="cols">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">uuid</span><span class="col-badge badge-pk">PK</span></div>
+          <div class="col-row"><span class="col-name">catalog_id</span><span class="col-type">uuid</span><span class="col-badge badge-fk">FK → catalogs</span></div>
+          <div class="col-row"><span class="col-name">user_id</span><span class="col-type">uuid</span><span class="col-badge badge-fk">FK → auth.users</span></div>
+          <div class="col-row"><span class="col-name">role</span><span class="col-type">text</span><span class="col-badge badge-unique">"viewer"|"editor"|"owner"</span></div>
+          <div class="col-row"><span class="col-name">created_at</span><span class="col-type">timestamptz</span></div>
+          <div class="col-row" style="color:#6b21a8;font-weight:600;font-size:0.72rem;">UNIQUE(catalog_id, user_id)</div>
+        </div>
+      </div>
+      <div class="table-card">
+        <div class="header bg-sharing"><div class="icon">🧠</div> capability_chunks (RAG)</div>
+        <div class="cols">
+          <div class="col-row"><span class="col-name">id</span><span class="col-type">uuid</span><span class="col-badge badge-pk">PK</span></div>
+          <div class="col-row"><span class="col-name">label</span><span class="col-type">text NOT NULL</span></div>
+          <div class="col-row"><span class="col-name">level</span><span class="col-type">text NOT NULL</span></div>
+          <div class="col-row"><span class="col-name">industry</span><span class="col-type">text NOT NULL</span><span class="col-badge badge-idx">IDX</span></div>
+          <div class="col-row"><span class="col-name">content</span><span class="col-type">text NOT NULL</span></div>
+          <div class="col-row"><span class="col-name">embedding</span><span class="col-type">vector(1536)</span><span class="col-badge badge-idx">IVFFlat</span></div>
+          <div class="col-row"><span class="col-name">source</span><span class="col-type">text NOT NULL</span><span class="col-badge badge-unique">"template"|"client_map"</span></div>
+          <div class="col-row"><span class="col-name">source_catalog_id</span><span class="col-type">uuid</span><span class="col-badge badge-fk">FK → catalogs</span></div>
+          <div class="col-row"><span class="col-name">created_at</span><span class="col-type">timestamptz</span></div>
+          <div class="col-row" style="color:#059669;font-weight:600;font-size:0.72rem;">NO RLS — shared knowledge base, filtered by industry</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <h2>Relationships</h2>
+    <table class="rel-table">
+      <thead>
+        <tr><th>From</th><th>→ To</th><th>FK Column</th><th>Cardinality</th><th>Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>client_members</code></td><td><code>clients</code></td><td>client_id</td><td>Many : 1</td><td>Who has access to a client folder</td></tr>
+        <tr><td><code>client_members</code></td><td><code>auth.users</code></td><td>user_id</td><td>Many : 1</td><td>Which user</td></tr>
+        <tr><td><code>clients</code></td><td><code>auth.users</code></td><td>created_by</td><td>Many : 1</td><td>Who created the folder</td></tr>
+        <tr><td><code>capability_catalogs</code></td><td><code>clients</code></td><td>client_id</td><td>Many : 1</td><td>Map belongs to client folder</td></tr>
+        <tr><td><code>capability_catalogs</code></td><td><code>auth.users</code></td><td>user_id</td><td>Many : 1</td><td>Map creator/owner</td></tr>
+        <tr><td><code>capabilities</code></td><td><code>capability_catalogs</code></td><td>catalog_id</td><td>Many : 1</td><td>Capabilities belong to a map</td></tr>
+        <tr><td><code>capabilities</code></td><td><code>capabilities</code></td><td>parent_id</td><td>Many : 1</td><td>Self-referencing hierarchy (L0→L3)</td></tr>
+        <tr><td><code>visual_maps</code></td><td><code>capability_catalogs</code></td><td>catalog_id</td><td>Many : 1</td><td>Layout versions per map</td></tr>
+        <tr><td><code>diff_history</code></td><td><code>capability_catalogs</code></td><td>catalog_id</td><td>Many : 1</td><td>Change audit log per map</td></tr>
+        <tr><td><code>diff_history</code></td><td><code>visual_maps</code></td><td>visual_map_id</td><td>Many : 1</td><td>Which version snapshot</td></tr>
+        <tr><td><code>prompt_sessions</code></td><td><code>capability_catalogs</code></td><td>catalog_id</td><td>Many : 1</td><td>AI prompts per map</td></tr>
+        <tr><td><code>catalog_shares</code></td><td><code>capability_catalogs</code></td><td>catalog_id</td><td>Many : 1</td><td>Direct sharing access</td></tr>
+        <tr><td><code>capability_chunks</code></td><td><code>capability_catalogs</code></td><td>source_catalog_id</td><td>Many : 1</td><td>RAG chunk origin</td></tr>
+      </tbody>
+    </table>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <h2>Capability Hierarchy</h2>
+    <div class="hierarchy">
+<span class="l0">L0: Strategic Portfolio Management</span>          <span class="comment">← Domain (colored band)</span>
+├── <span class="l1">L1: Strategy & OKR</span>                      <span class="comment">← Group (column)</span>
+│   ├── <span class="l2">L2: Strategy Definition</span>             <span class="comment">← Subgroup (section header)</span>
+│   │   ├── <span class="l3">L3: Define Strategic Goals</span>      <span class="comment">← Leaf (bullet item)</span>
+│   │   ├── <span class="l3">L3: Prioritize Initiatives</span>
+│   │   └── <span class="l3">L3: Align to OKRs</span>
+│   └── <span class="l2">L2: Strategy Execution</span>
+│       ├── <span class="l3">L3: Track Progress</span>
+│       └── <span class="l3">L3: Report Outcomes</span>
+└── <span class="l1">L1: Governance</span>
+    └── <span class="l2">L2: Compliance</span>
+        ├── <span class="l3">L3: Policy Management</span>
+        └── <span class="l3">L3: Risk Assessment</span>
+
+<span class="comment">Linked by: parent_id → capabilities.id (self-referencing FK)</span>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <h2>Access Control (RLS)</h2>
+    <div class="access-flow">
+      <h3>3 ways a user can access a capability_catalog:</h3>
+      <div class="access-step">
+        <div class="num">1</div>
+        <div class="desc"><strong>Owner</strong> — <code>catalog.user_id = auth.uid()</code></div>
+      </div>
+      <div class="access-step">
+        <div class="num">2</div>
+        <div class="desc"><strong>Shared</strong> — <code>catalog_shares.user_id = auth.uid()</code></div>
+      </div>
+      <div class="access-step">
+        <div class="num">3</div>
+        <div class="desc"><strong>Client Member</strong> — <code>client_members.user_id = auth.uid()</code> AND <code>catalog.client_id = client_members.client_id</code></div>
+      </div>
+      <h3 style="margin-top:20px;">Access cascades down:</h3>
+      <p style="font-size:0.85rem;color:#475569;margin-top:8px;">
+        capability_catalogs → capabilities → visual_maps → diff_history → prompt_sessions
+      </p>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <h2>Role Permissions (client_members.role)</h2>
+    <table class="perm-table">
+      <thead>
+        <tr><th>Action</th><th>Admin</th><th>Editor</th><th>Viewer</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>View client folder & maps</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td></tr>
+        <tr><td>Open capability canvas</td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td></tr>
+        <tr><td>Create / upload new maps</td><td class="check">✓</td><td class="check">✓</td><td class="cross">✗</td></tr>
+        <tr><td>Edit capabilities (AI / manual)</td><td class="check">✓</td><td class="check">✓</td><td class="cross">✗</td></tr>
+        <tr><td>Instantiate templates</td><td class="check">✓</td><td class="check">✓</td><td class="cross">✗</td></tr>
+        <tr><td>Add / remove members</td><td class="check">✓</td><td class="cross">✗</td><td class="cross">✗</td></tr>
+        <tr><td>Change member roles</td><td class="check">✓</td><td class="cross">✗</td><td class="cross">✗</td></tr>
+        <tr><td>Rename / delete client folder</td><td class="check">✓</td><td class="cross">✗</td><td class="cross">✗</td></tr>
+        <tr><td>View diff / audit history</td><td class="check">✓</td><td class="check">✓</td><td class="cross">✗</td></tr>
+      </tbody>
+    </table>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <h2>Triggers & Functions</h2>
+    <table class="rel-table">
+      <thead>
+        <tr><th>Name</th><th>Table</th><th>Event</th><th>Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>client_auto_admin</code></td><td>clients</td><td>AFTER INSERT</td><td>Auto-adds creator as admin in client_members</td></tr>
+        <tr><td><code>clients_updated_at</code></td><td>clients</td><td>BEFORE UPDATE</td><td>Auto-sets updated_at = now()</td></tr>
+        <tr><td><code>capabilities_updated_at</code></td><td>capabilities</td><td>BEFORE UPDATE</td><td>Auto-sets updated_at = now()</td></tr>
+        <tr><td><code>user_can_write_client()</code></td><td>—</td><td>Function</td><td>Returns true if user is admin/editor of given client</td></tr>
+      </tbody>
+    </table>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <h2>SQL File Locations</h2>
+    <table class="rel-table">
+      <thead>
+        <tr><th>File</th><th>Purpose</th><th>Run Order</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>src/lib/db/postgres/schema.sql</code></td><td>Base schema (7 tables + RLS policies)</td><td>1st</td></tr>
+        <tr><td><code>src/lib/db/postgres/migration_clients.sql</code></td><td>Client folders (2 new tables + updated RLS)</td><td>2nd</td></tr>
+      </tbody>
+    </table>
+
+    <p style="margin-top:40px;color:#94a3b8;font-size:0.75rem;text-align:center;">
+      Generated July 13, 2026 · Visual Placemat MVP
+    </p>
+  </div>
+</body>
+</html>

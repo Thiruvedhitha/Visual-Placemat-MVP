@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, requireServerEnv } from "@/lib/db/postgres/client";
+import { getUser } from "@/lib/auth/getUser";
 
 /**
  * POST /api/catalogs/save
@@ -10,6 +11,7 @@ import { supabaseAdmin, requireServerEnv } from "@/lib/db/postgres/client";
 export async function POST(request: NextRequest) {
   try {
     requireServerEnv();
+    const user = await getUser();
     const body = await request.json();
     const { catalogId, catalogName, capabilities, nodeStyles } = body;
 
@@ -26,6 +28,12 @@ export async function POST(request: NextRequest) {
       // ── Update existing catalog ──
       finalCatalogId = catalogId;
 
+      // Update name/metadata if changed
+      await supabaseAdmin
+        .from("capability_catalogs")
+        .update({ name: catalogName, updated_at: new Date().toISOString() })
+        .eq("id", finalCatalogId);
+
       // Delete old capabilities
       const { error: delError } = await supabaseAdmin
         .from("capabilities")
@@ -41,7 +49,8 @@ export async function POST(request: NextRequest) {
           name: catalogName,
           industry: body.industry || null,
           client_name: body.clientName || null,
-          user_id: null,
+          client_id: body.clientId || null,
+          user_id: user?.id || null,
         })
         .select("id")
         .single();

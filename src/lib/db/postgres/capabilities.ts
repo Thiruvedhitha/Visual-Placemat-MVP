@@ -178,3 +178,16 @@ export async function getCatalogs() {
   if (error) throw new Error("Failed to fetch catalogs: " + error.message);
   return data;
 }
+
+/** Get catalogs owned by a specific user (their "My Diagrams") */
+export async function getCatalogsForUser(userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("capability_catalogs")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .order("updated_at", { ascending: false });
+
+  if (error) throw new Error("Failed to fetch user catalogs: " + error.message);
+  return data;
+}

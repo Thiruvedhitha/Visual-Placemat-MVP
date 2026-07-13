@@ -166,7 +166,7 @@ function DashboardContent() {
   const isAiMode = searchParams.get("mode") === "ai";
 
   // Zustand store
-  const storeCapabilities = useCatalogStore((s) => s.capabilities);
+  const storeCapabilities = useCatalogStore((s) => s.capabilities) ?? [];
   const storeCatalogId = useCatalogStore((s) => s.catalogId);
   const catalogName = useCatalogStore((s) => s.catalogName);
   const isDirty = useCatalogStore((s) => s.isDirty);
@@ -195,6 +195,7 @@ function DashboardContent() {
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const debounceSnapshotRef = useRef<UndoSnapshot | null>(null);
   const undoLoadedRef = useRef(false);
+  const dataLoadedRef = useRef(false);
   undoStackRef.current = undoStack;
   redoStackRef.current = redoStack;
   capabilitiesRef.current = capabilities;
@@ -250,12 +251,16 @@ function DashboardContent() {
       return;
     }
 
+    // Prevent re-fetch loop after data is already loaded
+    if (dataLoadedRef.current) return;
+
     // If Zustand has capabilities for the same catalog, use those
     if (storeCapabilities.length > 0 && (!catalogIdParam || catalogIdParam === storeCatalogId)) {
       setCapabilities(storeCapabilities);
       setUndoStack([]);
       setRedoStack([]);
       setLoading(false);
+      dataLoadedRef.current = true;
       return;
     }
 
@@ -277,6 +282,7 @@ function DashboardContent() {
           if (data.catalog.node_styles && typeof data.catalog.node_styles === "object") {
             setNodeStyles(data.catalog.node_styles);
           }
+          dataLoadedRef.current = true;
         } else {
           setError(data.error || "Failed to load capabilities");
         }
@@ -287,7 +293,9 @@ function DashboardContent() {
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-  }, []);
+    // Reset data loaded flag when catalog changes
+    dataLoadedRef.current = false;
+  }, [catalogIdParam]);
 
   // Load undo/redo stacks from localStorage (once per catalog)
   useEffect(() => {

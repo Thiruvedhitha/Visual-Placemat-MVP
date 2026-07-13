@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { ClientFolder, ClientCatalog, RecentCommit } from "@/app/api/clients/route";
+import type { ClientFolder, ClientCatalog, RecentCommit } from "@/types/capability";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -260,9 +260,10 @@ export default function ClientFolders() {
   const [folders, setFolders] = useState<ClientFolder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [clientSectionOpen, setClientSectionOpen] = useState(false);
 
   useEffect(() => {
-    fetch("/api/clients")
+    fetch("/api/my-works")
       .then((r) => r.json())
       .then((data) => {
         if (Array.isArray(data)) setFolders(data);
@@ -299,37 +300,53 @@ export default function ClientFolders() {
       {/* ── My Diagrams ── */}
       <MyDiagramsSection catalogs={myDiagrams?.catalogs ?? []} />
 
-      {/* ── Client Diagrams ── */}
-      <div>
-        <div className="mb-4 flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-700 text-white">
+      {/* ── Client Diagrams (collapsible) ── */}
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
+        <button
+          onClick={() => setClientSectionOpen((v) => !v)}
+          className="flex w-full items-center gap-3 px-4 py-3.5 text-left"
+        >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-700 text-white">
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v8.25A2.25 2.25 0 004.5 16.5h15a2.25 2.25 0 002.25-2.25V8.25A2.25 2.25 0 0019.5 6h-5.379a1.5 1.5 0 01-1.06-.44z" />
             </svg>
           </span>
-          <h2 className="text-base font-bold text-slate-800">Client Diagrams</h2>
-          <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">
+          <span className="flex-1 truncate text-sm font-semibold text-slate-700">Client Diagrams</span>
+          <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
             {clientFolders.length} client{clientFolders.length !== 1 ? "s" : ""}
           </span>
-        </div>
+          <svg
+            className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200 ${clientSectionOpen ? "rotate-180" : ""}`}
+            fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+          </svg>
+        </button>
 
-        {clientFolders.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-200 px-5 py-8 text-center">
-            <p className="text-sm font-medium text-slate-500">No client folders yet</p>
-            <p className="mt-1 text-xs text-slate-400">
-              Upload a file and assign it a client name to create a client folder.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {clientFolders.map((folder, idx) => (
-              <ClientAccordion
-                key={folder.client_name}
-                folder={folder}
-                accentColor={CLIENT_ACCENT[idx % CLIENT_ACCENT.length]}
-                defaultOpen={false}
-              />
-            ))}
+        {clientSectionOpen && (
+          <div className="border-t border-slate-100 px-4 py-3">
+            {clientFolders.length === 0 ? (
+              <Link href="/clients" className="block rounded-lg border border-dashed border-slate-200 px-4 py-5 text-center hover:border-brand-300 hover:bg-brand-50/30 transition-all">
+                <p className="text-sm font-medium text-slate-500">No client folders yet</p>
+                <p className="mt-1 text-xs text-slate-400">
+                  Go to Client Folders to create and manage client-specific capability maps.
+                </p>
+              </Link>
+            ) : (
+              <div className="space-y-2">
+                {clientFolders.map((folder, idx) => (
+                  <ClientAccordion
+                    key={folder.client_name}
+                    folder={folder}
+                    accentColor={CLIENT_ACCENT[idx % CLIENT_ACCENT.length]}
+                    defaultOpen={false}
+                  />
+                ))}
+                <Link href="/clients" className="mt-2 block text-center text-xs text-brand-600 hover:text-brand-800 font-medium py-2">
+                  Manage all clients →
+                </Link>
+              </div>
+            )}
           </div>
         )}
       </div>

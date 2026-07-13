@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseCapabilityCatalog } from "@/lib/parser/excelParser";
 import { createCatalog, insertCapabilitiesForCatalog, findDuplicateCatalog } from "@/lib/db/postgres/capabilities";
+import { getUser } from "@/lib/auth/getUser";
 
 export async function POST(request: NextRequest) {
   try {
+    const user = await getUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
 
@@ -53,8 +59,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 2. Create catalog record (fast — single insert)
-    // user_id will be set when auth is wired up
-    const catalogId = await createCatalog(catalogName, { industry, clientName });
+    const catalogId = await createCatalog(catalogName, { industry, clientName, userId: user.id });
 
     // 3. Fire-and-forget: insert capabilities in background
     insertCapabilitiesForCatalog(catalogId, rows).catch((err) =>
@@ -77,8 +82,13 @@ export async function POST(request: NextRequest) {
 
 export async function GET() {
   try {
-    const { getCatalogs } = await import("@/lib/db/postgres/capabilities");
-    const catalogs = await getCatalogs();
+    const user = await getUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { getCatalogsForUser } = await import("@/lib/db/postgres/capabilities");
+    const catalogs = await getCatalogsForUser(user.id);
     return NextResponse.json(catalogs);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
