@@ -35,9 +35,6 @@ export default function HomePage() {
           </p>
 
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <a href="/login" className="rounded-xl bg-brand-600 px-6 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-brand-500">
-              Sign in
-            </a>
             <a href="#how-it-works" className="rounded-xl border border-slate-500 px-6 py-3 text-sm font-semibold text-slate-200 transition hover:border-white hover:text-white">
               See how it works
             </a>
