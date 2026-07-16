@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, requireServerEnv } from "@/lib/db/postgres/client";
 import { getUser } from "@/lib/auth/getUser";
+import { getUserClientRole } from "@/lib/db/clients";
 
 /**
  * POST /api/catalogs/save
@@ -20,6 +21,21 @@ export async function POST(request: NextRequest) {
         { error: "Missing catalogName or capabilities" },
         { status: 400 }
       );
+    }
+
+    // ── Role guard: reject saves from viewers ──
+    if (catalogId && user) {
+      const { data: cat } = await supabaseAdmin
+        .from("capability_catalogs")
+        .select("client_id")
+        .eq("id", catalogId)
+        .single();
+      if (cat?.client_id) {
+        const role = await getUserClientRole(cat.client_id, user.id);
+        if (role === "viewer") {
+          return NextResponse.json({ error: "Viewers cannot save changes" }, { status: 403 });
+        }
+      }
     }
 
     let finalCatalogId: string;

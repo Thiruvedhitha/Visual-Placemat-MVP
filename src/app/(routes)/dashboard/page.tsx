@@ -182,6 +182,10 @@ function DashboardContent() {
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [useTemplateOpen, setUseTemplateOpen] = useState(false);
 
+  // Role-based access: null means unknown / not loaded yet; treat as read-only for safety
+  const [userRole, setUserRole] = useState<"admin" | "editor" | "viewer" | null>(null);
+  const canEdit = userRole === "admin" || userRole === "editor";
+
   // Local undo/redo stacks — in memory only, never saved to DB (max 10 steps)
   type UndoSnapshot = { capabilities: Capability[]; nodeStyles: Record<string, NodeStylePatch> };
   const [undoStack, setUndoStack] = useState<UndoSnapshot[]>([]);
@@ -191,6 +195,7 @@ function DashboardContent() {
   const redoStackRef = useRef<UndoSnapshot[]>([]);
   const capabilitiesRef = useRef<Capability[]>([]);
   const nodeStylesRef = useRef<Record<string, NodeStylePatch>>({});
+  const canEditRef = useRef(false);
   // Debounce refs for text/color changes — captures "before" snapshot, pushes after idle
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const debounceSnapshotRef = useRef<UndoSnapshot | null>(null);
@@ -199,6 +204,7 @@ function DashboardContent() {
   undoStackRef.current = undoStack;
   redoStackRef.current = redoStack;
   capabilitiesRef.current = capabilities;
+  canEditRef.current = canEdit;
 
   // Canvas state
   const [nodes, setNodes] = useState<Node<CapabilityNodeData>[]>([]);
@@ -282,6 +288,8 @@ function DashboardContent() {
           if (data.catalog.node_styles && typeof data.catalog.node_styles === "object") {
             setNodeStyles(data.catalog.node_styles);
           }
+          // Set role: null → treat as viewer (safe default)
+          setUserRole(data.userRole ?? null);
           dataLoadedRef.current = true;
         } else {
           setError(data.error || "Failed to load capabilities");
@@ -345,6 +353,7 @@ function DashboardContent() {
 
     const handler = (e: KeyboardEvent) => {
       // Allow Ctrl+Z / Ctrl+Y even when an input/textarea has focus
+      if (!canEditRef.current) return; // viewers cannot undo/redo
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
         e.preventDefault();
         const stack = undoStackRef.current;
@@ -1016,131 +1025,156 @@ function DashboardContent() {
             interactionMode={interactionMode}
             onModeChange={setInteractionMode}
           />
-          {/* Undo / Redo buttons */}
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => {
-                const stack = undoStackRef.current;
-                if (stack.length === 0) return;
-                const prev = stack[stack.length - 1];
-                setUndoStack(stack.slice(0, -1));
-                setRedoStack((r) => [...r, { capabilities: capabilitiesRef.current, nodeStyles: nodeStylesRef.current }]);
-                setCapabilities(prev.capabilities);
-                setNodeStylesLocal(prev.nodeStyles);
-                useCatalogStore.setState({ capabilities: prev.capabilities, nodeStyles: prev.nodeStyles, isDirty: true });
-              }}
-              disabled={undoStack.length === 0}
-              title={`Undo (Ctrl+Z)${undoStack.length > 0 ? ` · ${undoStack.length} step${undoStack.length > 1 ? "s" : ""}` : ""}`}
-              className="rounded p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-30"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
-              </svg>
-            </button>
-            <button
-              onClick={() => {
-                const stack = redoStackRef.current;
-                if (stack.length === 0) return;
-                const next = stack[stack.length - 1];
-                setRedoStack(stack.slice(0, -1));
-                setUndoStack((u) => [...u, { capabilities: capabilitiesRef.current, nodeStyles: nodeStylesRef.current }]);
-                setCapabilities(next.capabilities);
-                setNodeStylesLocal(next.nodeStyles);
-                useCatalogStore.setState({ capabilities: next.capabilities, nodeStyles: next.nodeStyles, isDirty: true });
-              }}
-              disabled={redoStack.length === 0}
-              title={`Redo (Ctrl+Y)${redoStack.length > 0 ? ` · ${redoStack.length} step${redoStack.length > 1 ? "s" : ""}` : ""}`}
-              className="rounded p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-30"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 15l6-6m0 0l-6-6m6 6H9a6 6 0 000 12h3" />
-              </svg>
-            </button>
-          </div>
+
+          {/* View-only badge */}
+          {userRole === "viewer" && (
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[11px] font-medium text-slate-500">
+              View only
+            </span>
+          )}
+
+          {/* Undo / Redo buttons — editors/admins only */}
+          {canEdit && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => {
+                  const stack = undoStackRef.current;
+                  if (stack.length === 0) return;
+                  const prev = stack[stack.length - 1];
+                  setUndoStack(stack.slice(0, -1));
+                  setRedoStack((r) => [...r, { capabilities: capabilitiesRef.current, nodeStyles: nodeStylesRef.current }]);
+                  setCapabilities(prev.capabilities);
+                  setNodeStylesLocal(prev.nodeStyles);
+                  useCatalogStore.setState({ capabilities: prev.capabilities, nodeStyles: prev.nodeStyles, isDirty: true });
+                }}
+                disabled={undoStack.length === 0}
+                title={`Undo (Ctrl+Z)${undoStack.length > 0 ? ` · ${undoStack.length} step${undoStack.length > 1 ? "s" : ""}` : ""}`}
+                className="rounded p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-30"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+                </svg>
+              </button>
+              <button
+                onClick={() => {
+                  const stack = redoStackRef.current;
+                  if (stack.length === 0) return;
+                  const next = stack[stack.length - 1];
+                  setRedoStack(stack.slice(0, -1));
+                  setUndoStack((u) => [...u, { capabilities: capabilitiesRef.current, nodeStyles: nodeStylesRef.current }]);
+                  setCapabilities(next.capabilities);
+                  setNodeStylesLocal(next.nodeStyles);
+                  useCatalogStore.setState({ capabilities: next.capabilities, nodeStyles: next.nodeStyles, isDirty: true });
+                }}
+                disabled={redoStack.length === 0}
+                title={`Redo (Ctrl+Y)${redoStack.length > 0 ? ` · ${redoStack.length} step${redoStack.length > 1 ? "s" : ""}` : ""}`}
+                className="rounded p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-30"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 15l6-6m0 0l-6-6m6 6H9a6 6 0 000 12h3" />
+                </svg>
+              </button>
+            </div>
+          )}
           {applyError && (
             <p className="text-xs text-red-500">{applyError}</p>
           )}
-          {/* Use template */}
-          <button
-            onClick={() => setUseTemplateOpen(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-brand-400 hover:text-brand-600"
-            title="Load a saved template onto the canvas"
-          >
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" />
-            </svg>
-            Use template
-          </button>
 
-          {/* Save as Template */}
-          <button
-            onClick={() => setSaveTemplateOpen(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-amber-400 hover:text-amber-600"
-            title="Save current diagram as a reusable template"
-          >
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
-            </svg>
-            Save as template
-          </button>
+          {/* Use template — editors/admins only */}
+          {canEdit && (
+            <button
+              onClick={() => setUseTemplateOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-brand-400 hover:text-brand-600"
+              title="Load a saved template onto the canvas"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" />
+              </svg>
+              Use template
+            </button>
+          )}
 
-          {/* AI map editor toggle */}
-          <button
-            onClick={() => {
-              setAiPanelOpen((v) => {
-                if (!v) { setSelectedNodeId(null); setSelectedNodeIds(new Set()); }
-                setPropertiesPanelOpen(false);
-                return !v;
-              });
-            }}
-            className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition ${
-              aiPanelOpen
-                ? "border-blue-500 bg-blue-500 text-white"
-                : "border-slate-200 bg-white text-slate-700 hover:border-blue-400 hover:text-blue-600"
-            }`}
-          >
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-            </svg>
-            AI map editor
-          </button>
-          {/* Properties panel toggle */}
-          <button
-            onClick={() => { setPropertiesPanelOpen((v) => !v); setAiPanelOpen(false); }}
-            className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition ${
-              propertiesPanelOpen
-                ? "border-indigo-500 bg-indigo-500 text-white"
-                : "border-slate-200 bg-white text-slate-700 hover:border-indigo-400 hover:text-indigo-600"
-            }`}
-          >
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
-            </svg>
-            Properties
-          </button>
-          <button
-            onClick={handleApply}
-            disabled={applying || !isDirty}
-            className={`rounded-lg px-4 py-1.5 text-xs font-semibold shadow-sm transition ${
-              isDirty && !applying
-                ? "bg-green-600 text-white hover:bg-green-700"
-                : "cursor-not-allowed bg-slate-100 text-slate-300"
-            }`}
-          >
-            {applying ? (
-              <span className="flex items-center gap-1.5">
-                <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                Saving…
-              </span>
-            ) : isDirty ? (
-              "Apply"
-            ) : (
-              "Saved"
-            )}
-          </button>
+          {/* Save as Template — editors/admins only */}
+          {canEdit && (
+            <button
+              onClick={() => setSaveTemplateOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-amber-400 hover:text-amber-600"
+              title="Save current diagram as a reusable template"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
+              </svg>
+              Save as template
+            </button>
+          )}
+
+          {/* AI map editor toggle — editors/admins only */}
+          {canEdit && (
+            <button
+              onClick={() => {
+                setAiPanelOpen((v) => {
+                  if (!v) { setSelectedNodeId(null); setSelectedNodeIds(new Set()); }
+                  setPropertiesPanelOpen(false);
+                  return !v;
+                });
+              }}
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition ${
+                aiPanelOpen
+                  ? "border-blue-500 bg-blue-500 text-white"
+                  : "border-slate-200 bg-white text-slate-700 hover:border-blue-400 hover:text-blue-600"
+              }`}
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+              </svg>
+              AI map editor
+            </button>
+          )}
+
+          {/* Properties panel toggle — editors/admins only */}
+          {canEdit && (
+            <button
+              onClick={() => { setPropertiesPanelOpen((v) => !v); setAiPanelOpen(false); }}
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition ${
+                propertiesPanelOpen
+                  ? "border-indigo-500 bg-indigo-500 text-white"
+                  : "border-slate-200 bg-white text-slate-700 hover:border-indigo-400 hover:text-indigo-600"
+              }`}
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
+              </svg>
+              Properties
+            </button>
+          )}
+
+          {/* Apply / Save — editors/admins only */}
+          {canEdit && (
+            <button
+              onClick={handleApply}
+              disabled={applying || !isDirty}
+              className={`rounded-lg px-4 py-1.5 text-xs font-semibold shadow-sm transition ${
+                isDirty && !applying
+                  ? "bg-green-600 text-white hover:bg-green-700"
+                  : "cursor-not-allowed bg-slate-100 text-slate-300"
+              }`}
+            >
+              {applying ? (
+                <span className="flex items-center gap-1.5">
+                  <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Saving…
+                </span>
+              ) : isDirty ? (
+                "Apply"
+              ) : (
+                "Saved"
+              )}
+            </button>
+          )}
+
           <Link
             href={exportHref}
             className="rounded-lg bg-brand-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-700"
@@ -1172,7 +1206,7 @@ function DashboardContent() {
 
       {/* Body: left sidebar + canvas + right sidebar */}
       <div className="flex flex-1 overflow-hidden">
-        <LeftSidebar visibleLevels={visibleLevels} onToggleLevel={onToggleLevel} onAddNode={() => setAddNodeOpen(true)} />
+        <LeftSidebar visibleLevels={visibleLevels} onToggleLevel={onToggleLevel} onAddNode={canEdit ? () => setAddNodeOpen(true) : undefined} />
 
         {/* Canvas area */}
         <div className="relative flex-1 overflow-auto">
@@ -1182,11 +1216,11 @@ function DashboardContent() {
             nodeTypes={NODE_TYPES}
             onNodesChange={onNodesChange}
             onNodeClick={onNodeClick}
-            onNodeDragStart={onNodeDragStart}
-            onNodeDrag={onNodeDrag}
-            onNodeDragStop={onNodeDragStop}
+            onNodeDragStart={canEdit ? onNodeDragStart : undefined}
+            onNodeDrag={canEdit ? onNodeDrag : undefined}
+            onNodeDragStop={canEdit ? onNodeDragStop : undefined}
             onPaneClick={onPaneClick}
-            nodesDraggable={true}
+            nodesDraggable={canEdit}
             panOnDrag={true}
             panOnScroll={true}
             panOnScrollMode={"free" as import("reactflow").PanOnScrollMode}
@@ -1200,7 +1234,7 @@ function DashboardContent() {
             <Background gap={20} size={1} color="#e2e8f0" />
 
             {/* Drop indicator */}
-            {dropIndicator && (
+            {canEdit && dropIndicator && (
               <div
                 style={{
                   position: "absolute",
@@ -1253,42 +1287,46 @@ function DashboardContent() {
             )}
           </ReactFlow>
 
-          {/* Add Node wizard */}
-          <AddNodeWizard
-            open={addNodeOpen}
-            onClose={() => setAddNodeOpen(false)}
-            capabilities={capabilities}
-            onApply={(cmds) => {
-              applyAICommands(cmds);
-              showToast.success(`Added ${cmds.length} node${cmds.length !== 1 ? "s" : ""}`);
-            }}
-          />
+          {/* Add Node wizard — editors/admins only */}
+          {canEdit && (
+            <AddNodeWizard
+              open={addNodeOpen}
+              onClose={() => setAddNodeOpen(false)}
+              capabilities={capabilities}
+              onApply={(cmds) => {
+                applyAICommands(cmds);
+                showToast.success(`Added ${cmds.length} node${cmds.length !== 1 ? "s" : ""}`);
+              }}
+            />
+          )}
 
-          {/* AI Map Editor panel — overlays the canvas from the right */}
-          <AIMapEditor
-            open={aiPanelOpen}
-            onClose={() => {
-              setAiPanelOpen(false);
-              setAiPickMode(false);
-              setAiTargetNodeId(null);
-            }}
-            capabilities={capabilities}
-            nodeStyles={nodeStyles}
-            selectedNodeId={aiTargetNodeId}
-            pickMode={aiPickMode}
-            onEnterPickMode={() => setAiPickMode(true)}
-            onExitPickMode={() => {
-              setAiPickMode(false);
-              setAiTargetNodeId(null);
-            }}
-            onAICommands={applyAICommands}
-            onUpdateNode={onUpdateNode}
-            onPickNode={(id) => setAiTargetNodeId(id || null)}
-          />
+          {/* AI Map Editor panel — editors/admins only */}
+          {canEdit && (
+            <AIMapEditor
+              open={aiPanelOpen}
+              onClose={() => {
+                setAiPanelOpen(false);
+                setAiPickMode(false);
+                setAiTargetNodeId(null);
+              }}
+              capabilities={capabilities}
+              nodeStyles={nodeStyles}
+              selectedNodeId={aiTargetNodeId}
+              pickMode={aiPickMode}
+              onEnterPickMode={() => setAiPickMode(true)}
+              onExitPickMode={() => {
+                setAiPickMode(false);
+                setAiTargetNodeId(null);
+              }}
+              onAICommands={applyAICommands}
+              onUpdateNode={onUpdateNode}
+              onPickNode={(id) => setAiTargetNodeId(id || null)}
+            />
+          )}
         </div>
 
-        {/* Properties sidebar — single or multi-select */}
-        {selectedNodeIds.size >= 1 && !aiPanelOpen && (
+        {/* Properties sidebar — single or multi-select (editors/admins only) */}
+        {canEdit && selectedNodeIds.size >= 1 && !aiPanelOpen && (
           <div className="relative flex flex-shrink-0">
             <button
               onClick={() => { setSelectedNodeId(null); setSelectedNodeIds(new Set()); }}
@@ -1405,23 +1443,27 @@ function DashboardContent() {
         )}
       </div>
 
-      {/* Save as Template modal */}
-      <SaveAsTemplateModal
-        open={saveTemplateOpen}
-        onClose={() => setSaveTemplateOpen(false)}
-        capabilities={capabilities}
-        defaultName={catalogName}
-      />
+      {/* Save as Template modal — editors/admins only */}
+      {canEdit && (
+        <SaveAsTemplateModal
+          open={saveTemplateOpen}
+          onClose={() => setSaveTemplateOpen(false)}
+          capabilities={capabilities}
+          defaultName={catalogName}
+        />
+      )}
 
-      {/* Use Template modal */}
-      <TemplatePickerModal
-        open={useTemplateOpen}
-        onClose={() => setUseTemplateOpen(false)}
-        onSelect={(caps, name) => {
-          pushUndoAndSet(caps);
-          useCatalogStore.setState({ catalogName: name, isDirty: true });
-        }}
-      />
+      {/* Use Template modal — editors/admins only */}
+      {canEdit && (
+        <TemplatePickerModal
+          open={useTemplateOpen}
+          onClose={() => setUseTemplateOpen(false)}
+          onSelect={(caps, name) => {
+            pushUndoAndSet(caps);
+            useCatalogStore.setState({ catalogName: name, isDirty: true });
+          }}
+        />
+      )}
 
     </div>
   );
