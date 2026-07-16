@@ -92,6 +92,7 @@ export function convertRowsToCapabilities(
         level: lvl as 0 | 1 | 2 | 3,
         name: value,
         description,
+        note: null,
         sort_order: sortOrder++,
         source: "xlsx_import",
         is_deleted: false,
