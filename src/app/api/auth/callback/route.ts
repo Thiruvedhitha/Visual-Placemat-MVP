@@ -6,12 +6,17 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/";
 
-  // Use x-forwarded-host (set by Render/proxies) to build the real public origin
-  const forwardedHost = request.headers.get("x-forwarded-host");
-  const forwardedProto = request.headers.get("x-forwarded-proto") ?? "https";
-  const origin = forwardedHost
-    ? `${forwardedProto}://${forwardedHost}`
-    : new URL(request.url).origin;
+  // Determine the public origin — try multiple approaches since Render's
+  // internal server exposes localhost:10000
+  const origin =
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    (request.headers.get("x-forwarded-host")
+      ? `${request.headers.get("x-forwarded-proto") ?? "https"}://${request.headers.get("x-forwarded-host")}`
+      : null) ||
+    (request.headers.get("host") && !request.headers.get("host")!.startsWith("localhost")
+      ? `https://${request.headers.get("host")}`
+      : null) ||
+    new URL(request.url).origin;
 
   if (code) {
     const response = NextResponse.redirect(`${origin}${next}`);
