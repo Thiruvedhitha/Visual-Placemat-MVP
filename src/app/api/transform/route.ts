@@ -178,7 +178,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { prompt, capabilities, nodeStyles = {}, history = [], mode = "command", legend } = body;
+  const { prompt, capabilities, nodeStyles = {}, history = [], mode = "command", legend: rawLegend } = body;
+  const legend = rawLegend ? { fill: rawLegend.fill ?? [], border: rawLegend.border ?? [], textColor: rawLegend.textColor ?? [] } : undefined;
 
   if (!prompt || typeof prompt !== "string" || prompt.trim() === "") {
     return NextResponse.json({ error: "prompt is required" }, { status: 400 });
