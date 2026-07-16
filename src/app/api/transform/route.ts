@@ -179,7 +179,9 @@ export async function POST(req: Request) {
   }
 
   const { prompt, capabilities, nodeStyles = {}, history = [], mode = "command", legend: rawLegend } = body;
-  const legend = rawLegend ? { fill: rawLegend.fill ?? [], border: rawLegend.border ?? [], textColor: rawLegend.textColor ?? [] } : undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const leg = rawLegend as any;
+  const legend = leg ? { fill: leg.fill ?? [], border: leg.border ?? [], textColor: leg.textColor ?? [] } : undefined;
 
   if (!prompt || typeof prompt !== "string" || prompt.trim() === "") {
     return NextResponse.json({ error: "prompt is required" }, { status: 400 });
