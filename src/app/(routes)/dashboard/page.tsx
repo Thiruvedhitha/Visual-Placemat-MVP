@@ -978,6 +978,30 @@ function DashboardContent() {
     [selectedNodeId, nodes]
   );
 
+  // Pick up transcript commands stored by the Analyze Transcript page (opened in a new tab).
+  // Runs once after the catalog data has loaded — checked via dataLoadedRef.
+  useEffect(() => {
+    if (!catalogIdParam || loading) return;
+    const key = `transcript_commands_${catalogIdParam}`;
+    try {
+      const raw = sessionStorage.getItem(key);
+      if (!raw) return;
+      sessionStorage.removeItem(key);
+      const payload = JSON.parse(raw) as { commands: DiagramCommand[]; ts: number };
+      if (
+        Array.isArray(payload.commands) &&
+        payload.commands.length > 0 &&
+        Date.now() - payload.ts < 5 * 60 * 1000  // stale-guard: ignore if older than 5 min
+      ) {
+        applyAICommands(payload.commands);
+        showToast.success(`Applied ${payload.commands.length} transcript change${payload.commands.length !== 1 ? "s" : ""}`);
+      }
+    } catch {
+      // ignore parse / storage errors
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, catalogIdParam]);
+
   // Loading / error states
   if (loading) {
     return (

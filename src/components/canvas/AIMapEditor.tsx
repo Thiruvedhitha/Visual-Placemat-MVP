@@ -1184,6 +1184,17 @@ export default function AIMapEditor({
                 {action.label}
               </button>
             ))}
+            {/* Transcript import — opens dedicated review page in a new tab */}
+            {catalogId && (
+              <a
+                href={`/transcripts/analyze?catalogId=${catalogId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="col-span-2 flex items-center justify-center gap-1.5 rounded-lg border border-white/15 bg-white/5 py-1.5 text-xs font-medium text-slate-200 transition hover:border-amber-400 hover:bg-amber-500/10 hover:text-amber-200"
+              >
+                <span>📋</span> Import meeting transcript
+              </a>
+            )}
           </div>
 
           {/* Legend command reference — collapsible */}

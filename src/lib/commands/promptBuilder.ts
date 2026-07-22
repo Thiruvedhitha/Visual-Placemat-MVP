@@ -295,6 +295,94 @@ ${tree}`;
 }
 
 /**
+ * Builds the system prompt for TRANSCRIPT mode.
+ * The AI receives the cleaned meeting transcript as the user message and returns
+ * an array of todos, each carrying one DiagramCommand.
+ * Legend and node styles are passed so the AI uses the user's existing categories.
+ */
+export function buildTranscriptPrompt(
+  capabilities: Capability[],
+  nodeStyles: Record<string, NodeStylePatch> = {},
+  legend?: LegendConfig,
+  allCapabilities?: Capability[]
+): string {
+  const tree = renderTree(capabilities, nodeStyles, allCapabilities);
+  const legendSection = buildLegendSection(legend);
+
+  return `You are an AI assistant that analyses meeting transcripts and extracts capability map changes.
+
+## Your task
+Read the meeting transcript provided by the user and extract every EXPLICIT decision or CLEAR implication that would change the capability map. For each finding, produce one human-readable todo and one DiagramCommand that executes it.
+
+## Response format — return ONLY this JSON, no markdown:
+{
+  "understanding": "2-3 sentence summary of what was discussed and decided",
+  "todos": [
+    {
+      "id": "t1",
+      "text": "Short human-readable description of the action",
+      "quote": "≤200 char verbatim excerpt that supports this todo",
+      "confidence": 0.95,
+      "command": { ...single DiagramCommand... }
+    }
+  ]
+}
+
+## Available DiagramCommand types
+
+1. RENAME_NODE — rename a capability
+{ "type": "RENAME_NODE", "nodeId": "<uuid>", "newName": "new name" }
+
+2. ADD_NODE — add a new capability node
+{ "type": "ADD_NODE", "tempId": "<new-uuid-v4>", "parentId": "<uuid-or-null>", "level": 1, "name": "Name", "description": "optional" }
+   Level rules: L0 parentId=null. L1 under L0. L2 under L1. L3 under L2.
+
+3. DELETE_NODE — remove a capability
+{ "type": "DELETE_NODE", "nodeId": "<uuid>" }
+   Optional: "reparentChildren": true to lift children to the deleted node's parent.
+
+4. REPARENT_NODE — move a node under a different parent
+{ "type": "REPARENT_NODE", "nodeId": "<uuid>", "newParentId": "<uuid>" }
+   New parent MUST be exactly one level above (L1→under L0, L2→under L1, L3→under L2).
+
+5. SET_STYLE — change background fill and/or border colour
+{ "type": "SET_STYLE", "nodeId": "<uuid>", "fill": "#rrggbb", "border": "#rrggbb" }
+   Use this when the transcript implies a capability's status (e.g. "we have this", "gap", "in progress").
+
+6. SET_LEGEND — create or update a colour-legend category
+{ "type": "SET_LEGEND", "slot": "fill"|"border"|"textColor", "entryId": "<slug>", "label": "<label>", "color": "#rrggbb" }
+   Emit this alongside SET_STYLE when you assign a semantic meaning to a colour.
+
+7. SET_NOTE — add a note to a capability
+{ "type": "SET_NOTE", "nodeId": "<uuid>", "note": "text" }
+
+8. SET_DESCRIPTION — update a capability's description
+{ "type": "SET_DESCRIPTION", "nodeId": "<uuid>", "description": "text" }
+
+9. RESET_STYLE — clear a colour override
+{ "type": "RESET_STYLE", "nodeId": "<uuid>" }
+
+## Confidence guide
+- 0.9–1.0 : explicit decision stated in the meeting ("we agreed to rename…", "let's add…")
+- 0.6–0.89: clearly implied ("this is definitely a gap", "we're building this now")
+- below 0.6: ambiguous — include only if there is reasonable evidence
+
+## Extraction rules — CRITICAL
+- Only extract EXPLICIT decisions or CLEAR implications. Ignore hypotheticals ("if we had…"), questions, and side discussions.
+- If the same capability is mentioned multiple times, use the FINAL or STRONGEST signal.
+- Never invent node IDs. Use ONLY the IDs listed in the diagram below.
+- For ADD_NODE, generate a valid UUID v4 for tempId (xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx).
+- When using SET_STYLE for status, also emit SET_LEGEND using the existing category slugs from the Current Legend section (if a matching category exists, reuse its color and entryId; otherwise create a new one).
+- Use hex colour codes only. Never use CSS colour names.
+- Return an empty todos array if no capability-relevant changes were found.
+
+${legendSection}
+
+## Current Capability Map
+${tree}`;
+}
+
+/**
  * Computes the canonical hierarchical number for a capability (e.g. "1.7.5.1")
  * using the FULL capability list so positions match what the canvas displays.
  */
