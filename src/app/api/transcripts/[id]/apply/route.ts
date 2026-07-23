@@ -65,7 +65,7 @@ export async function POST(
     .eq("id", id);
 
   // Write a commit entry to chat_history so it appears in Version History panel.
-  // Mirrors the shape used by /api/chat PUT.
+  // Write directly to Supabase instead of an internal fetch (relative URLs don't work server-side).
   const adds     = commands.filter((c) => c.type === "ADD_NODE").length;
   const deletes  = commands.filter((c) => c.type === "DELETE_NODE").length;
   const renames  = commands.filter((c) => c.type === "RENAME_NODE" || c.type === "REPARENT_NODE").length;
@@ -77,24 +77,34 @@ export async function POST(
 
   if (transcript.catalog_id) {
     try {
-      await fetch(`${process.env.NEXT_PUBLIC_SITE_URL ?? ""}/api/chat`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          catalogId: transcript.catalog_id,
-          commit: {
-            prompt: `Transcript: ${transcript.title ?? "Untitled meeting"}`,
-            summary: transcript.understanding ?? `Applied ${commands.length} change${commands.length !== 1 ? "s" : ""} from meeting transcript`,
-            adds,
-            deletes,
-            renames,
-            styles,
-            ts: new Date().toISOString(),
-          },
-        }),
-      });
+      const newCommit = {
+        prompt: `Transcript: ${transcript.title ?? "Untitled meeting"}`,
+        summary: transcript.understanding ?? `Applied ${commands.length} change${commands.length !== 1 ? "s" : ""} from meeting transcript`,
+        adds,
+        deletes,
+        renames,
+        styles,
+        ts: new Date().toISOString(),
+      };
+      const { data: catalogRow } = await supabase
+        .from("capability_catalogs")
+        .select("chat_history")
+        .eq("id", transcript.catalog_id)
+        .single();
+      const history = (catalogRow?.chat_history ?? { map: [], commits: [] }) as {
+        map: unknown[];
+        commits: unknown[];
+        sessions?: unknown[];
+      };
+      const commits = Array.isArray(history.commits) ? history.commits : [];
+      commits.push(newCommit);
+      history.commits = commits.slice(-50); // keep last 50, same as /api/chat
+      await supabase
+        .from("capability_catalogs")
+        .update({ chat_history: history })
+        .eq("id", transcript.catalog_id);
     } catch {
-      // Non-fatal — the canvas still applies the commands even if the commit write fails
+      // Non-fatal — commands still apply even if the commit write fails
     }
   }
 

@@ -207,7 +207,10 @@ export default function AnalyzeTranscriptPage() {
           style={{ width: `${transcript?.progress ?? 10}%` }}
         />
       </div>
-      <p className="text-slate-300 text-sm mb-8">{transcript?.current_step ?? "Starting…"}</p>
+      <div className="flex items-center justify-between mb-8">
+        <p className="text-slate-300 text-sm">{transcript?.current_step ?? "Starting…"}</p>
+        <p className="text-slate-400 text-sm font-mono tabular-nums">{transcript?.progress ?? 10}%</p>
+      </div>
       <div className="space-y-3">
         {STEPS.map((step) => {
           const prog = transcript?.progress ?? 0;

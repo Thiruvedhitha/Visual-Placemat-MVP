@@ -254,6 +254,7 @@ function DashboardContent() {
       useCatalogStore.getState().clear();
       setCapabilities([]);
       setLoading(false);
+      setUserRole("editor");
       return;
     }
 
@@ -267,6 +268,8 @@ function DashboardContent() {
       setRedoStack([]);
       setLoading(false);
       dataLoadedRef.current = true;
+      // No DB fetch here — treat the session owner as editor so the AI button is visible
+      setUserRole("editor");
       return;
     }
 
