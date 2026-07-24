@@ -27,58 +27,109 @@ interface TranscriptRecord {
   error_message?: string;
 }
 
+interface CatalogOption {
+  id: string;
+  name: string;
+  group: string;       // "My Diagrams" | client name | "Templates"
+  isTemplate: boolean;
+}
+
 type Phase = "upload" | "processing" | "review" | "applying" | "done";
 
-// ── Progress steps (for the animated stepper) ─────────────────────────────
+// ── Progress steps ─────────────────────────────────────────────────────────
 
 const STEPS = [
-  { label: "Removing noise",              minProgress: 10 },
+  { label: "Removing noise",               minProgress: 10 },
   { label: "Extracting capability changes", minProgress: 40 },
-  { label: "Preparing review",            minProgress: 70 },
-  { label: "Ready for review",            minProgress: 90 },
+  { label: "Preparing review",             minProgress: 70 },
+  { label: "Ready for review",             minProgress: 90 },
 ];
 
-// ── Command type → group ───────────────────────────────────────────────────
+// ── Command type → badge ───────────────────────────────────────────────────
 
 const STRUCTURAL_TYPES = new Set(["ADD_NODE", "DELETE_NODE", "RENAME_NODE", "REPARENT_NODE"]);
 
 const ACTION_BADGE: Record<string, { label: string; cls: string }> = {
-  ADD_NODE:     { label: "Add",     cls: "bg-emerald-500/20 text-emerald-400" },
-  DELETE_NODE:  { label: "Remove",  cls: "bg-red-500/20 text-red-400" },
-  RENAME_NODE:  { label: "Rename",  cls: "bg-purple-500/20 text-purple-400" },
-  REPARENT_NODE:{ label: "Move",    cls: "bg-blue-500/20 text-blue-400" },
-  SET_STYLE:    { label: "Style",   cls: "bg-violet-500/20 text-violet-400" },
-  RESET_STYLE:  { label: "Reset",   cls: "bg-gray-500/20 text-gray-400" },
-  SET_LEGEND:   { label: "Legend",  cls: "bg-amber-500/20 text-amber-400" },
-  REMOVE_LEGEND:{ label: "Legend−", cls: "bg-amber-500/20 text-amber-400" },
-  SET_NOTE:     { label: "Note",    cls: "bg-sky-500/20 text-sky-400" },
-  SET_DESCRIPTION:{ label: "Desc", cls: "bg-sky-500/20 text-sky-400" },
-  SET_TEXT_COLOR: { label: "Color", cls: "bg-pink-500/20 text-pink-400" },
+  ADD_NODE:       { label: "Add",     cls: "bg-emerald-500/20 text-emerald-400" },
+  DELETE_NODE:    { label: "Remove",  cls: "bg-red-500/20 text-red-400" },
+  RENAME_NODE:    { label: "Rename",  cls: "bg-purple-500/20 text-purple-400" },
+  REPARENT_NODE:  { label: "Move",    cls: "bg-blue-500/20 text-blue-400" },
+  SET_STYLE:      { label: "Style",   cls: "bg-violet-500/20 text-violet-400" },
+  RESET_STYLE:    { label: "Reset",   cls: "bg-gray-500/20 text-gray-400" },
+  SET_LEGEND:     { label: "Legend",  cls: "bg-amber-500/20 text-amber-400" },
+  REMOVE_LEGEND:  { label: "Legend−", cls: "bg-amber-500/20 text-amber-400" },
+  SET_NOTE:       { label: "Note",    cls: "bg-sky-500/20 text-sky-400" },
+  SET_DESCRIPTION:{ label: "Desc",    cls: "bg-sky-500/20 text-sky-400" },
+  SET_TEXT_COLOR: { label: "Color",   cls: "bg-pink-500/20 text-pink-400" },
 };
 
 // ── Main page ──────────────────────────────────────────────────────────────
 
 export default function AnalyzeTranscriptPage() {
   const searchParams = useSearchParams();
-  const router = useRouter();
-  const catalogId     = searchParams.get("catalogId");
-  const legend        = useCatalogStore((s) => s.legend);
+  const router       = useRouter();
+  const legend       = useCatalogStore((s) => s.legend);
 
-  const [phase,         setPhase]         = useState<Phase>("upload");
-  const [text,          setText]          = useState("");
-  const [title,         setTitle]         = useState("");
-  const [transcriptId,  setTranscriptId]  = useState<string | null>(null);
-  const [transcript,    setTranscript]    = useState<TranscriptRecord | null>(null);
-  const [changes,       setChanges]       = useState<ProposedChange[]>([]);
-  const [error,         setError]         = useState("");
+  // catalogId comes from URL param (when opened from sidebar) OR the dropdown selection
+  const urlCatalogId = searchParams.get("catalogId");
+  const [selectedCatalogId, setSelectedCatalogId] = useState<string>(urlCatalogId ?? "");
+  const catalogId = selectedCatalogId || urlCatalogId || "";
+
+  // ── Catalog options ────────────────────────────────────────────────────
+  const [catalogOptions,  setCatalogOptions]  = useState<CatalogOption[]>([]);
+  const [loadingCatalogs, setLoadingCatalogs] = useState(true);
+
+  useEffect(() => {
+    async function loadOptions() {
+      setLoadingCatalogs(true);
+      const opts: CatalogOption[] = [];
+
+      // 1. User's own diagrams + client folders
+      try {
+        const res = await fetch("/api/my-works");
+        if (res.ok) {
+          const folders: { client_name: string; catalogs: { id: string; name: string }[] }[] =
+            await res.json();
+          for (const folder of folders) {
+            const group = folder.client_name === "My Diagrams" ? "My Diagrams" : folder.client_name;
+            for (const c of folder.catalogs ?? []) {
+              opts.push({ id: c.id, name: c.name, group, isTemplate: false });
+            }
+          }
+        }
+      } catch { /* non-fatal */ }
+
+      // 2. Built-in templates
+      try {
+        const res = await fetch("/api/catalogs/templates");
+        if (res.ok) {
+          const data = await res.json();
+          for (const t of data.templates ?? []) {
+            opts.push({ id: t.id, name: t.name, group: "Templates", isTemplate: true });
+          }
+        }
+      } catch { /* non-fatal */ }
+
+      setCatalogOptions(opts);
+      setLoadingCatalogs(false);
+    }
+    loadOptions();
+  }, []);
+
+  const [phase,        setPhase]        = useState<Phase>("upload");
+  const [text,         setText]         = useState("");
+  const [title,        setTitle]        = useState("");
+  const [transcriptId, setTranscriptId] = useState<string | null>(null);
+  const [transcript,   setTranscript]   = useState<TranscriptRecord | null>(null);
+  const [changes,      setChanges]      = useState<ProposedChange[]>([]);
+  const [error,        setError]        = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ── Cleanup polling on unmount ──────────────────────────────────────────
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
   // ── Upload & analyse ───────────────────────────────────────────────────
   async function handleUpload() {
-    if (!catalogId) { setError("No catalog selected. Open a diagram first, then use Analyze Transcript."); return; }
+    if (!catalogId) { setError("Select a diagram or template before analyzing."); return; }
     if (text.trim().length < 50) { setError("Transcript must be at least 50 characters"); return; }
     setError("");
     setPhase("processing");
@@ -101,7 +152,6 @@ export default function AnalyzeTranscriptPage() {
       if (!res.ok) return;
       const { transcript: t, changes: ch } = await res.json();
       setTranscript(t);
-
       if (t.status === "ready_for_review") {
         clearInterval(pollRef.current!);
         setChanges(ch as ProposedChange[]);
@@ -115,11 +165,11 @@ export default function AnalyzeTranscriptPage() {
   }
 
   // ── Selection toggles ──────────────────────────────────────────────────
-  const toggleChange = useCallback((id: string) =>
+  const toggleChange   = useCallback((id: string) =>
     setChanges((prev) => prev.map((c) => c.id === id ? { ...c, selected: !c.selected } : c)), []);
-  const selectAll         = () => setChanges((p) => p.map((c) => ({ ...c, selected: true })));
-  const deselectAll       = () => setChanges((p) => p.map((c) => ({ ...c, selected: false })));
-  const selectHighConf    = () => setChanges((p) => p.map((c) => ({ ...c, selected: c.confidence >= 0.8 })));
+  const selectAll      = () => setChanges((p) => p.map((c) => ({ ...c, selected: true })));
+  const deselectAll    = () => setChanges((p) => p.map((c) => ({ ...c, selected: false })));
+  const selectHighConf = () => setChanges((p) => p.map((c) => ({ ...c, selected: c.confidence >= 0.8 })));
 
   // ── Apply selected changes ─────────────────────────────────────────────
   async function handleApply() {
@@ -128,31 +178,28 @@ export default function AnalyzeTranscriptPage() {
     setError("");
     setPhase("applying");
 
-    // Save selections to DB
     await fetch(`/api/transcripts/${transcriptId}/changes`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ selections: changes.map((c) => ({ id: c.id, selected: c.selected })) }),
     });
 
-    // Fetch commands + mark applied
     const res = await fetch(`/api/transcripts/${transcriptId}/apply`, { method: "POST" });
     const data = await res.json();
     if (!res.ok) { setError(data.error || "Apply failed"); setPhase("review"); return; }
 
     const commands: DiagramCommand[] = data.commands ?? [];
-
-    // Store commands in sessionStorage so the dashboard can pick them up on focus/load.
-    // The dashboard checks for a pending transcript payload on mount.
     if (commands.length > 0 && catalogId) {
       sessionStorage.setItem(
         `transcript_commands_${catalogId}`,
         JSON.stringify({ commands, transcriptId, ts: Date.now() })
       );
     }
-
     setPhase("done");
   }
+
+  // ── Group catalog options for the <select> ─────────────────────────────
+  const groups = Array.from(new Set(catalogOptions.map((o) => o.group)));
 
   // ── Render: upload ─────────────────────────────────────────────────────
   if (phase === "upload") return (
@@ -170,6 +217,42 @@ export default function AnalyzeTranscriptPage() {
 
       {error && <div className="bg-red-500/10 border border-red-500/50 text-red-400 p-3 rounded mb-4 text-sm">{error}</div>}
 
+      {/* ── Diagram / template selector ── */}
+      <label className="block mb-1 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+        Select diagram to update
+      </label>
+      {loadingCatalogs ? (
+        <div className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 mb-4 text-sm text-slate-500 flex items-center gap-2">
+          <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          Loading your diagrams…
+        </div>
+      ) : (
+        <select
+          value={selectedCatalogId}
+          onChange={(e) => setSelectedCatalogId(e.target.value)}
+          className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 mb-4 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+        >
+          <option value="" disabled>— Choose a diagram or template —</option>
+          {groups.map((group) => (
+            <optgroup key={group} label={group}>
+              {catalogOptions
+                .filter((o) => o.group === group)
+                .map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.isTemplate ? `📋 ${o.name}` : o.name}
+                  </option>
+                ))}
+            </optgroup>
+          ))}
+          {catalogOptions.length === 0 && (
+            <option value="" disabled>No diagrams found — upload one first</option>
+          )}
+        </select>
+      )}
+
       <input
         type="text"
         placeholder="Meeting title (optional)"
@@ -181,18 +264,18 @@ export default function AnalyzeTranscriptPage() {
         placeholder="Paste your Teams / Zoom / Google Meet transcript here..."
         value={text}
         onChange={(e) => setText(e.target.value)}
-        rows={16}
+        rows={14}
         className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-3 font-mono text-sm mb-4 resize-y text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
       />
       <div className="flex items-center gap-4">
         <button
           onClick={handleUpload}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded font-medium text-sm transition"
+          disabled={!catalogId || loadingCatalogs}
+          className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white px-6 py-2 rounded font-medium text-sm transition"
         >
           Analyze Transcript
         </button>
         <span className="text-slate-500 text-xs">{text.length.toLocaleString()} characters</span>
-        {!catalogId && <span className="text-amber-400 text-xs">⚠ No catalog — open a diagram first</span>}
       </div>
     </div>
   );
