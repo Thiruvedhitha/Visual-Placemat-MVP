@@ -267,6 +267,8 @@ function DashboardContent() {
       setRedoStack([]);
       setLoading(false);
       dataLoadedRef.current = true;
+      // Freshly uploaded/transformed diagram — current user is the owner, grant full access
+      setUserRole("admin");
       return;
     }
 

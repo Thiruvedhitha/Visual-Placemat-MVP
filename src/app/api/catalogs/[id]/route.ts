@@ -50,6 +50,9 @@ export async function GET(
       const user = await getUser();
       if (user && catalog.client_id) {
         userRole = await getUserClientRole(catalog.client_id, user.id);
+      } else if (user && !catalog.client_id) {
+        // Personal diagram (no client): authenticated user gets full edit access
+        userRole = "admin";
       }
     } catch {
       // Non-fatal: fall back to null (viewer behaviour)
