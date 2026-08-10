@@ -6,6 +6,12 @@ import type { Capability } from "@/types/capability";
 import type { NodeStylePatch } from "@/lib/commands/index";
 import { useCatalogStore } from "@/stores/catalogStore";
 import type { LegendEntry } from "@/stores/catalogStore";
+import dynamic from "next/dynamic";
+
+const TranscriptReviewModal = dynamic(
+  () => import("@/components/transcript/TranscriptReviewModal"),
+  { ssr: false }
+);
 
 const LEVEL_LABELS = ["L0 domain", "L1 group", "L2 subgroup", "L3 leaf"];
 
@@ -14,7 +20,7 @@ const LEVEL_BG_DEFAULTS: Record<number, string> = {
   0: "#0f1b2d",
   1: "#2563eb",
   2: "#599dff",
-  3: "#ffffff",
+  3: "#d1e3ff",
 };
 
 // Default border colors per level
@@ -156,6 +162,7 @@ interface RightSidebarProps {
   node: { id: string; data: CapabilityNodeData } | null;
   capabilities: Capability[];
   nodeStyles?: Record<string, NodeStylePatch>;
+  catalogId?: string;
   onUpdateNode?: (id: string, patch: Partial<CapabilityNodeData>) => void;
   /** Move a node to a different parent (hierarchy enforced in handler) */
   onReparent?: (nodeId: string, newParentId: string) => void;
@@ -165,6 +172,8 @@ interface RightSidebarProps {
   onDeleteChild?: (childId: string) => void;
   /** Permanently delete the currently selected node (and all its descendants) */
   onDeleteNode?: (nodeId: string) => void;
+  /** Called after a transcript is applied so the canvas can refresh */
+  onTranscriptApplied?: () => void;
 }
 
 // ── ChildrenPanel ────────────────────────────────────────────────────────────
@@ -360,12 +369,15 @@ export default function RightSidebar({
   node,
   capabilities,
   nodeStyles = {},
+  catalogId,
   onUpdateNode,
   onReparent,
   onDetachChild,
   onDeleteChild,
   onDeleteNode,
+  onTranscriptApplied,
 }: RightSidebarProps) {
+  const [transcriptOpen, setTranscriptOpen] = useState(false);
   // Track initial editable values when a node is first selected (for reset)
   const [initialData, setInitialData] = useState<{
     fill?: string;
@@ -398,6 +410,33 @@ export default function RightSidebar({
       <aside className="flex w-80 flex-shrink-0 flex-col border-l border-slate-200 bg-white p-5">
         <h3 className="text-sm font-semibold text-slate-800">Node properties</h3>
         <p className="mt-4 text-xs text-slate-400">Click a node to inspect</p>
+
+        {catalogId && (
+          <>
+            <div className="my-4 border-t border-slate-100" />
+            <button
+              onClick={() => setTranscriptOpen(true)}
+              className="flex items-center gap-2 rounded-lg border border-dashed border-brand-300 bg-brand-50 px-3 py-2.5 text-xs font-medium text-brand-700 transition hover:bg-brand-100"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+              </svg>
+              Update diagram from transcript
+            </button>
+
+            {transcriptOpen && (
+              <TranscriptReviewModal
+                mode="edit_diagram"
+                catalogId={catalogId}
+                onClose={() => setTranscriptOpen(false)}
+                onApplied={() => {
+                  setTranscriptOpen(false);
+                  onTranscriptApplied?.();
+                }}
+              />
+            )}
+          </>
+        )}
       </aside>
     );
   }

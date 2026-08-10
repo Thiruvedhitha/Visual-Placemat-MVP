@@ -104,6 +104,7 @@ function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
   if (data.level === 1) {
     const headerColor = data.fill || LEVEL_COLORS[1];
     const borderColor = data.border || headerColor;
+    const hasBorderOverride = !!data.border && data.border !== headerColor;
     const textColor = data.textColor || "#fff";
 
     return (
@@ -114,7 +115,7 @@ function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
           height: height ? `${height}px` : "auto",
           borderRadius: "8px",
           overflow: "hidden",
-          border: `3px solid ${isHighlighted ? "#f59e0b" : borderColor}`,
+          border: `${hasBorderOverride ? "4px" : "3px"} solid ${isHighlighted ? "#f59e0b" : borderColor}`,
           boxShadow: isHighlighted
             ? "none"
             : pickBorder ?? "0 2px 8px rgba(0,0,0,0.12)",
@@ -153,6 +154,7 @@ function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
   if (data.level === 2) {
     const bgColor = data.fill || LEVEL_COLORS[2];
     const borderColor = data.border || bgColor;
+    const hasBorderOverride = !!data.border && data.border !== bgColor;
     const textColor = data.textColor || "#0f1b2d";
 
     return (
@@ -162,7 +164,7 @@ function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
           width: `${width}px`,
           height: height ? `${height}px` : "auto",
           borderRadius: "6px",
-          border: `3px solid ${isHighlighted ? "#f59e0b" : borderColor}`,
+          border: `${hasBorderOverride ? "4px" : "3px"} solid ${isHighlighted ? "#f59e0b" : borderColor}`,
           boxShadow: isHighlighted
             ? "none"
             : pickBorder ?? "0 1px 4px rgba(0,0,0,0.1)",
@@ -200,6 +202,7 @@ function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
   }
 
   // ── L3: White box with L3 sidebar color border ──
+  const hasBorderOverride = !!data.border && data.border !== LEVEL_COLORS[3];
   return (
     <div
       data-capability-node-id={id}
@@ -216,7 +219,7 @@ function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
         justifyContent: "center",
         padding: "4px 8px",
         background: data.fill || "#fff",
-        border: `2px solid ${data.border || LEVEL_COLORS[3]}`,
+        border: `${hasBorderOverride ? "3px" : "2px"} solid ${data.border || LEVEL_COLORS[3]}`,
         borderRadius: "4px",
         cursor: data.pickMode ? "pointer" : "grab",
         userSelect: "none",

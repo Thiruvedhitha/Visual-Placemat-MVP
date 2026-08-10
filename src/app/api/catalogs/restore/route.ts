@@ -47,6 +47,9 @@ export async function POST(request: NextRequest) {
         note: string | null;
         sort_order: number;
         source: string;
+        fill_category_id?: string | null;
+        border_category_id?: string | null;
+        text_category_id?: string | null;
       }>;
       nodeStyles?: Record<string, unknown>;
     };
@@ -87,6 +90,9 @@ export async function POST(request: NextRequest) {
         note: c.note || null,
         sort_order: c.sort_order,
         source: c.source || "xlsx_import",
+        fill_category_id: c.fill_category_id ?? null,
+        border_category_id: c.border_category_id ?? null,
+        text_category_id: c.text_category_id ?? null,
       }));
 
       const { data: inserted, error: insError } = await supabaseAdmin
@@ -144,6 +150,9 @@ export async function POST(request: NextRequest) {
       note: c.note || null,
       sort_order: c.sort_order,
       source: c.source || "xlsx_import",
+      fill_category_id: c.fill_category_id ?? null,
+      border_category_id: c.border_category_id ?? null,
+      text_category_id: c.text_category_id ?? null,
     }));
 
     return NextResponse.json({

@@ -9,6 +9,7 @@ import {
   isLastAdmin,
   findUserByEmail,
 } from "@/lib/db/clients";
+import { logAudit } from "@/lib/auth/audit";
 
 interface RouteParams {
   params: { clientId: string };
@@ -72,6 +73,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     const member = await addClientMember(clientId, targetUser.id, role, user.id);
+
+    await logAudit({
+      actorId:       user.id,
+      action:        "member.added",
+      targetUserId:  targetUser.id,
+      clientId,
+      newValue:      { role },
+    });
+
     return NextResponse.json(member, { status: 201 });
   } catch (err: unknown) {
     const pgError = err as { code?: string };
@@ -121,6 +131,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     await updateMemberRole(clientId, user_id, role);
+    await logAudit({
+      actorId:      user.id,
+      action:       "member.role_changed",
+      targetUserId: user_id,
+      clientId,
+      newValue:     { role },
+    });
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("PATCH /api/clients/[clientId]/members error:", err);
@@ -161,6 +178,12 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
 
   try {
     await removeClientMember(clientId, targetUserId);
+    await logAudit({
+      actorId:      user.id,
+      action:       "member.removed",
+      targetUserId,
+      clientId,
+    });
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("DELETE /api/clients/[clientId]/members error:", err);

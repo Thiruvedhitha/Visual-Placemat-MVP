@@ -1,0 +1,772 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Visual Placemat: Diagram Storage and Command Deep Dive</title>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #667085;
+      --paper: #f4f7fb;
+      --panel: #ffffff;
+      --line: #d8e0ea;
+      --blue: #1769e0;
+      --blue-soft: #eaf2ff;
+      --green: #087f5b;
+      --green-soft: #e8f7f1;
+      --amber: #b45309;
+      --amber-soft: #fff6df;
+      --red: #b42318;
+      --red-soft: #fff0ee;
+      --violet: #6941c6;
+      --violet-soft: #f2edff;
+      --cyan: #087e8b;
+      --cyan-soft: #e6f7f8;
+      --code: #111827;
+      --shadow: 0 10px 28px rgba(31, 48, 74, .08);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(rgba(23, 105, 224, .035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(23, 105, 224, .035) 1px, transparent 1px),
+        var(--paper);
+      background-size: 28px 28px;
+      font-family: "Aptos", "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    code, pre { font-family: "Cascadia Code", Consolas, monospace; }
+    code { color: #2457a7; }
+
+    .shell { min-height: 100vh; display: grid; grid-template-columns: 260px minmax(0, 1fr); }
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      background: #172033;
+      color: #dce6f5;
+      padding: 24px 16px;
+      border-right: 1px solid #26334a;
+    }
+    .brand { padding: 0 8px 22px; border-bottom: 1px solid #33405a; }
+    .brand strong { display: block; color: #fff; font-size: 17px; }
+    .brand span { color: #9aabc4; font-size: 12px; }
+    .nav-label { margin: 22px 8px 8px; color: #7386a5; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+    nav button {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 8px;
+      align-items: center;
+      padding: 9px 10px;
+      border: 0;
+      border-radius: 6px;
+      color: #b9c6d9;
+      background: transparent;
+      text-align: left;
+      font-size: 12px;
+    }
+    nav button:hover, nav button.active { color: #fff; background: #283750; }
+    .nav-no {
+      display: grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      background: #334968;
+      color: #bcd5ff;
+      font-size: 10px;
+      font-weight: 800;
+    }
+    nav button.active .nav-no { background: var(--blue); color: #fff; }
+
+    main { min-width: 0; padding: 36px clamp(20px, 4vw, 58px) 80px; }
+    .page { display: none; max-width: 1180px; margin: 0 auto; animation: enter .2s ease-out; }
+    .page.active { display: block; }
+    @keyframes enter { from { opacity: 0; transform: translateY(5px); } }
+
+    .eyebrow { color: var(--blue); font-size: 11px; font-weight: 800; text-transform: uppercase; }
+    h1 { margin: 6px 0 10px; max-width: 850px; font-size: clamp(28px, 4vw, 44px); line-height: 1.08; letter-spacing: 0; }
+    h2 { margin: 30px 0 12px; font-size: 21px; letter-spacing: 0; }
+    h3 { margin: 0 0 7px; font-size: 15px; letter-spacing: 0; }
+    .lead { max-width: 850px; margin: 0 0 26px; color: var(--muted); font-size: 15px; }
+
+    .answer {
+      display: grid;
+      grid-template-columns: 48px 1fr;
+      gap: 14px;
+      align-items: start;
+      margin: 22px 0;
+      padding: 18px;
+      border: 1px solid #bad3fb;
+      border-left: 4px solid var(--blue);
+      border-radius: 7px;
+      background: var(--blue-soft);
+    }
+    .answer .mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 6px; background: var(--blue); color: #fff; font-weight: 900; }
+    .answer p { margin: 2px 0 0; color: #3d5272; }
+
+    .grid { display: grid; gap: 14px; }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card {
+      min-width: 0;
+      padding: 17px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .card p { margin: 0; color: var(--muted); font-size: 13px; }
+    .card.blue { border-top: 3px solid var(--blue); }
+    .card.green { border-top: 3px solid var(--green); }
+    .card.amber { border-top: 3px solid #e49a25; }
+    .card.violet { border-top: 3px solid var(--violet); }
+    .card.cyan { border-top: 3px solid var(--cyan); }
+    .pill { display: inline-block; margin-bottom: 8px; padding: 3px 7px; border-radius: 4px; background: #eef2f7; color: #53647d; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+
+    .code {
+      overflow: auto;
+      margin: 10px 0 0;
+      padding: 14px;
+      border-radius: 6px;
+      background: var(--code);
+      color: #dbe7f7;
+      font-size: 11px;
+      line-height: 1.65;
+      white-space: pre;
+    }
+    .key { color: #8ec5ff; }
+    .str { color: #90e6ba; }
+    .num { color: #ffd479; }
+    .comment { color: #7f8da3; }
+    .danger { color: #ffaca3; }
+
+    .callout { margin: 16px 0; padding: 13px 15px; border-radius: 6px; font-size: 13px; }
+    .callout strong { display: block; margin-bottom: 3px; }
+    .callout.info { color: #355071; background: var(--blue-soft); border: 1px solid #c5dafa; }
+    .callout.ok { color: #275d4d; background: var(--green-soft); border: 1px solid #bce6d6; }
+    .callout.warn { color: #76510e; background: var(--amber-soft); border: 1px solid #f1d496; }
+    .callout.risk { color: #7c2f28; background: var(--red-soft); border: 1px solid #f2c4bf; }
+
+    .diagram {
+      overflow: auto;
+      margin: 16px 0;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+    }
+    .tree { min-width: 700px; text-align: center; }
+    .tree-node {
+      display: inline-block;
+      min-width: 150px;
+      padding: 9px 12px;
+      border: 2px solid #3d7dd8;
+      border-radius: 6px;
+      background: #f0f6ff;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .tree-node small { display: block; margin-top: 2px; color: #60718a; font-weight: 500; }
+    .trunk { width: 2px; height: 24px; margin: 0 auto; background: #9aabc4; }
+    .children { position: relative; display: flex; justify-content: center; gap: 34px; padding-top: 25px; }
+    .children::before { content: ""; position: absolute; top: 0; left: 18%; right: 18%; height: 2px; background: #9aabc4; }
+    .child { position: relative; flex: 1; max-width: 260px; }
+    .child::before { content: ""; position: absolute; top: -25px; left: 50%; width: 2px; height: 25px; background: #9aabc4; }
+    .leafs { display: grid; gap: 6px; margin-top: 10px; }
+    .leaf { padding: 7px; border-radius: 5px; background: #eef2f7; color: #485870; font-size: 11px; }
+
+    .flow { display: grid; gap: 0; margin: 18px 0; }
+    .step { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 14px; }
+    .rail { position: relative; display: flex; justify-content: center; }
+    .rail::after { content: ""; position: absolute; top: 36px; bottom: -12px; width: 2px; background: #ccd6e3; }
+    .step:last-child .rail::after { display: none; }
+    .dot { z-index: 1; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 6px; background: var(--blue); color: #fff; font-size: 12px; font-weight: 900; }
+    .step-body { margin-bottom: 15px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 7px; background: #fff; }
+    .step-body p { margin: 0; color: var(--muted); font-size: 13px; }
+    .step-body .meta { margin-top: 7px; color: #7b899c; font-size: 11px; }
+
+    .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 7px; background: #fff; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { padding: 10px 12px; color: #56657b; background: #f0f3f8; text-align: left; font-size: 10px; text-transform: uppercase; }
+    td { padding: 10px 12px; border-top: 1px solid #e5eaf1; vertical-align: top; }
+    td:first-child { font-weight: 700; }
+
+    .id-map { display: grid; grid-template-columns: 1fr 60px 1fr; gap: 10px; align-items: center; }
+    .id-box { padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: #fff; font-size: 11px; }
+    .id-arrow { color: var(--blue); text-align: center; font-size: 22px; font-weight: 800; }
+
+    .probe { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 16px; }
+    .probe button { padding: 8px 11px; border: 1px solid #b8c8dd; border-radius: 5px; background: #fff; color: #355071; font-size: 11px; font-weight: 700; }
+    .probe button:hover { background: var(--blue-soft); border-color: #7eacee; }
+    .probe-result { min-height: 130px; margin-top: 10px; padding: 12px; border-radius: 6px; background: var(--code); color: #dce8f8; font: 11px/1.6 "Cascadia Code", Consolas, monospace; white-space: pre-wrap; }
+
+    .mobile-nav { display: none; }
+    @media (max-width: 850px) {
+      .shell { display: block; }
+      aside { display: none; }
+      .mobile-nav { position: sticky; top: 0; z-index: 20; display: flex; gap: 6px; overflow-x: auto; padding: 10px; background: #172033; }
+      .mobile-nav button { flex: 0 0 auto; padding: 7px 10px; border: 0; border-radius: 5px; background: #2a3952; color: #dce6f5; font-size: 11px; }
+      main { padding-top: 26px; }
+      .grid.two, .grid.three, .probe { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="mobile-nav" id="mobileNav"></div>
+  <div class="shell">
+    <aside>
+      <div class="brand">
+        <strong>Diagram internals</strong>
+        <span>Storage, identity, commands and rendering</span>
+      </div>
+      <div class="nav-label">Foundation to runtime</div>
+      <nav id="sideNav"></nav>
+    </aside>
+
+    <main>
+      <section class="page active" id="concept">
+        <div class="eyebrow">01 · Foundation</div>
+        <h1>What is a catalog, and is it the diagram?</h1>
+        <p class="lead">A catalog is the diagram's owning document record. The visible diagram is assembled from that catalog record, its capability rows, visual overrides and the current renderer.</p>
+
+        <div class="answer">
+          <div class="mark">A</div>
+          <div>
+            <h3>Short answer: yes, at the product level</h3>
+            <p>Users think of a <strong>catalog</strong> as one saved capability-map diagram. Technically, the catalog row is only the aggregate root: it owns metadata and points to many capability rows. ReactFlow is a rendering of that stored domain model, not the database model itself.</p>
+          </div>
+        </div>
+
+        <div class="grid three">
+          <article class="card blue">
+            <span class="pill">Document</span>
+            <h3>capability_catalogs</h3>
+            <p>One row per diagram. Stores name, owner/client, industry, status, per-node style JSON, chat history, legend and notes.</p>
+          </article>
+          <article class="card green">
+            <span class="pill">Content</span>
+            <h3>capabilities</h3>
+            <p>Many rows per catalog. Each row is one business capability node with its UUID, parent UUID, level and content.</p>
+          </article>
+          <article class="card violet">
+            <span class="pill">Presentation</span>
+            <h3>ReactFlow nodes</h3>
+            <p>Generated in the browser from capabilities plus node_styles. Positions and visual containers are derived at render time.</p>
+          </article>
+        </div>
+
+        <h2>Think of it as an aggregate</h2>
+        <div class="code"><span class="key">Catalog / diagram document</span>
+├── metadata: name, industry, owner, client
+├── capabilities[]: semantic tree nodes
+├── node_styles{nodeId}: fill, border, textColor and AI patches
+├── chat_history: messages, commits and legend
+└── visual_maps[]: saved version snapshots
+
+<span class="comment">The diagram displayed on screen = capabilities + styles + layout algorithm.</span></div>
+
+        <div class="callout info">
+          <strong>Important distinction</strong>
+          A ReactFlow node is not stored as a ReactFlow JSON object. The application stores business capabilities, then <code>buildCanvasNodes()</code> creates ReactFlow nodes with coordinates, sizes and display data.
+        </div>
+      </section>
+
+      <section class="page" id="node">
+        <div class="eyebrow">02 · Node anatomy</div>
+        <h1>What exactly is one node?</h1>
+        <p class="lead">One node has a durable semantic record, optional catalog-level visual overrides, and a temporary ReactFlow representation.</p>
+
+        <div class="grid two">
+          <article class="card green">
+            <span class="pill">capabilities row</span>
+            <h3>Durable node content and structure</h3>
+            <div class="code">{
+  <span class="key">id</span>: <span class="str">"9c8...7a1"</span>,        <span class="comment">// node UUID</span>
+  <span class="key">catalog_id</span>: <span class="str">"cat...01"</span>, <span class="comment">// owning diagram</span>
+  <span class="key">parent_id</span>: <span class="str">"2af...e04"</span>,  <span class="comment">// parent node UUID</span>
+  <span class="key">level</span>: <span class="num">2</span>,
+  <span class="key">name</span>: <span class="str">"Account Management"</span>,
+  <span class="key">description</span>: <span class="str">"Manages accounts"</span>,
+  <span class="key">note</span>: <span class="str">"Review in Q4"</span>,
+  <span class="key">sort_order</span>: <span class="num">3</span>,
+  <span class="key">source</span>: <span class="str">"ai_generated"</span>,
+  <span class="key">is_deleted</span>: <span class="num">false</span>
+}</div>
+          </article>
+          <article class="card violet">
+            <span class="pill">node_styles JSON</span>
+            <h3>Optional display overrides keyed by UUID</h3>
+            <div class="code">{
+  <span class="str">"9c8...7a1"</span>: {
+    <span class="key">fill</span>: <span class="str">"#dbeafe"</span>,
+    <span class="key">border</span>: <span class="str">"#2563eb"</span>,
+    <span class="key">textColor</span>: <span class="str">"#172033"</span>,
+    <span class="key">note</span>: <span class="str">"AI-added note patch"</span>,
+    <span class="key">description</span>: <span class="str">"AI patch"</span>
+  }
+}</div>
+          </article>
+        </div>
+
+        <h2>Where each characteristic belongs</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Characteristic</th><th>Canonical place</th><th>How it is used</th></tr></thead>
+            <tbody>
+              <tr><td>Name</td><td><code>capabilities.name</code></td><td>Label shown on the canvas and sent to the LLM.</td></tr>
+              <tr><td>Parent</td><td><code>capabilities.parent_id</code></td><td>References another capability UUID in the same tree.</td></tr>
+              <tr><td>Children</td><td>Not stored as an array</td><td>Derived by finding rows where <code>parent_id === this.id</code>.</td></tr>
+              <tr><td>Level</td><td><code>capabilities.level</code></td><td>0 through 3; executor checks parent is exactly one level above.</td></tr>
+              <tr><td>Description</td><td><code>capabilities.description</code></td><td>Domain content. AI executor also mirrors it into a patch.</td></tr>
+              <tr><td>Note</td><td><code>capabilities.note</code></td><td>Manual edits and transcript TODOs persist here.</td></tr>
+              <tr><td>Background/border/text</td><td><code>capability_catalogs.node_styles[nodeId]</code></td><td>Overrides level defaults during ReactFlow rebuild.</td></tr>
+              <tr><td>Position</td><td>Derived</td><td><code>layoutEngine.ts</code> computes x/y from tree shape and levels.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout warn">
+          <strong>Current note/description nuance</strong>
+          Manual note edits update the capability row. AI <code>SET_NOTE</code> currently writes a node-style patch, while <code>SET_DESCRIPTION</code> updates both the capability and the patch. During rendering, style patches are spread after base node data, so a patch can override the row value in the browser.
+        </div>
+      </section>
+
+      <section class="page" id="tree">
+        <div class="eyebrow">03 · Tree model</div>
+        <h1>How flat database rows become a tree</h1>
+        <p class="lead">The database does not store nested JSON for the active diagram. It stores a self-referencing adjacency list.</p>
+
+        <div class="diagram">
+          <div class="tree">
+            <div class="tree-node">Retail Bank <small>id=A · parent_id=null · L0</small></div>
+            <div class="trunk"></div>
+            <div class="children">
+              <div class="child">
+                <div class="tree-node">Retail Banking <small>id=B · parent_id=A · L1</small></div>
+                <div class="leafs">
+                  <div class="leaf">Accounts · id=D · parent_id=B · L2</div>
+                  <div class="leaf">Lending · id=E · parent_id=B · L2</div>
+                </div>
+              </div>
+              <div class="child">
+                <div class="tree-node">Digital Banking <small>id=C · parent_id=A · L1</small></div>
+                <div class="leafs">
+                  <div class="leaf">Mobile Channel · id=F · parent_id=C · L2</div>
+                  <div class="leaf">Web Channel · id=G · parent_id=C · L2</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid two">
+          <article class="card blue">
+            <h3>Parent lookup</h3>
+            <div class="code">parent = capabilities.find(
+  cap =&gt; cap.id === node.parent_id
+)</div>
+          </article>
+          <article class="card green">
+            <h3>Children lookup</h3>
+            <div class="code">children = capabilities.filter(
+  cap =&gt; cap.parent_id === node.id
+)</div>
+          </article>
+        </div>
+
+        <h2>ReactFlow rendering is visually nested</h2>
+        <div class="callout info">
+          <strong>The dashboard currently passes <code>edges={[]}</code> to ReactFlow</strong>
+          Parent-child relationships are expressed by calculated placement and nested visual containers, not visible connector edges. L0 is a band, L1 is a column, L2 is a contained section and L3 is a row inside it.
+        </div>
+
+        <div class="flow">
+          <div class="step"><div class="rail"><div class="dot">1</div></div><div class="step-body"><h3>Index rows by UUID</h3><p><code>buildCanvasNodes()</code> creates a map of capability ID to a temporary TreeNode object.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">2</div></div><div class="step-body"><h3>Attach children</h3><p>For every row, the builder pushes it into its parent's <code>children[]</code>. Rows with no parent become roots.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">3</div></div><div class="step-body"><h3>Assign display numbers</h3><p>Sibling order creates numbers such as 1, 1.2 and 1.2.3. They are derived, not database IDs.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">4</div></div><div class="step-body"><h3>Calculate sizes and x/y</h3><p>Levels, children and label lengths determine group width, column height and positions.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">5</div></div><div class="step-body"><h3>Merge node styles</h3><p>The dashboard performs <code>{ ...node.data, ...nodeStyles[node.id] }</code>, then ReactFlow renders <code>CapabilityNode</code>.</p></div></div>
+        </div>
+      </section>
+
+      <section class="page" id="database">
+        <div class="eyebrow">04 · Database</div>
+        <h1>How one diagram is stored</h1>
+        <p class="lead">The active diagram spans multiple tables. This is the concrete relationship model used by the current code.</p>
+
+        <div class="code"><span class="key">capability_catalogs</span>  1 ─────────── N  <span class="key">capabilities</span>
+ id (PK)                              id (PK)
+ name                                 catalog_id (FK → catalog.id)
+ node_styles JSONB                    parent_id (FK → capabilities.id)
+ chat_history JSONB                   level, name, description, note
+                                         │
+                                         └── self-reference builds tree
+
+<span class="key">capability_catalogs</span>  1 ─────────── N  <span class="key">visual_maps</span>
+                                      version_number
+                                      is_active
+                                      layout_data JSONB snapshot
+
+<span class="key">capability_catalogs</span>  1 ─────────── N  <span class="key">meeting_transcripts</span>
+<span class="key">meeting_transcripts</span>  1 ─────────── N  <span class="key">transcript_proposals</span></div>
+
+        <div class="grid two" style="margin-top:14px">
+          <article class="card blue"><h3>capability_catalogs</h3><p>Aggregate metadata. <code>node_styles</code> is a map keyed by capability UUID. <code>chat_history</code> holds conversation data, commits and legend.</p></article>
+          <article class="card green"><h3>capabilities</h3><p>Current editable semantic state. The foreign key <code>catalog_id</code> groups nodes into a diagram; <code>parent_id</code> creates hierarchy.</p></article>
+          <article class="card violet"><h3>visual_maps</h3><p>An immutable-ish version snapshot created on every normal Apply. Stores capabilities and nodeStyles in <code>layout_data</code>.</p></article>
+          <article class="card amber"><h3>transcript tables</h3><p>Store source transcript, pipeline status and reviewable node/command/TODO proposal JSON before application.</p></article>
+        </div>
+
+        <h2>Current save operation</h2>
+        <div class="flow">
+          <div class="step"><div class="rail"><div class="dot">1</div></div><div class="step-body"><h3>POST /api/catalogs/save</h3><p>Browser sends catalogId, catalogName, the full capability array and nodeStyles.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">2</div></div><div class="step-body"><h3>Create or update catalog</h3><p>New diagrams insert a catalog. Existing diagrams update metadata, then delete all old capability rows.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">3</div></div><div class="step-body"><h3>Insert levels 0 → 3</h3><p>Rows are inserted level-by-level so each parent's new DB UUID exists before its children are inserted.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">4</div></div><div class="step-body"><h3>Remap styles</h3><p><code>tempToReal</code> changes each node_styles key from the browser ID to the freshly generated database ID.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">5</div></div><div class="step-body"><h3>Create visual_maps version</h3><p>Old versions become inactive; a new active snapshot stores remapped capabilities and styles.</p></div></div>
+        </div>
+
+        <div class="callout warn">
+          <strong>Apply is a full replacement, not row-by-row synchronization</strong>
+          For an existing catalog, the route deletes every capability row and reinserts the complete current tree. Consequently, database node UUIDs change on every normal Apply.
+        </div>
+      </section>
+
+      <section class="page" id="identity">
+        <div class="eyebrow">05 · UUID identity</div>
+        <h1>How the system knows which node a command targets</h1>
+        <p class="lead">Names are human-readable and can be duplicated. UUIDs are the command address.</p>
+
+        <div class="answer">
+          <div class="mark">ID</div>
+          <div>
+            <h3>The LLM does not independently discover the node</h3>
+            <p>The server serializes the current diagram into the system prompt with each node's name, level, hierarchy number and exact UUID. The LLM copies the required UUID into <code>nodeId</code>, <code>parentId</code> or <code>newParentId</code>.</p>
+          </div>
+        </div>
+
+        <div class="code"><span class="comment">System prompt excerpt produced by renderTree()</span>
+1 Retail Bank [id: <span class="str">11111111-1111-4111-8111-111111111111</span>]
+  1.1 Retail Banking [id: <span class="str">22222222-2222-4222-8222-222222222222</span>]
+    1.1.1 Account Management [id: <span class="str">33333333-3333-4333-8333-333333333333</span>]
+
+<span class="comment">User</span>
+"Rename Account Management to Customer Account Management"
+
+<span class="comment">LLM response</span>
+{
+  <span class="key">"commands"</span>: [{
+    <span class="key">"type"</span>: <span class="str">"RENAME_NODE"</span>,
+    <span class="key">"nodeId"</span>: <span class="str">"33333333-3333-4333-8333-333333333333"</span>,
+    <span class="key">"newName"</span>: <span class="str">"Customer Account Management"</span>
+  }]
+}</div>
+
+        <h2>Execution uses exact ID matching</h2>
+        <div class="grid two">
+          <article class="card green">
+            <h3>Valid address</h3>
+            <div class="code">idx = capabilities.findIndex(
+  cap =&gt; cap.id === cmd.nodeId
+)
+
+<span class="str">Found → update that row only</span></div>
+          </article>
+          <article class="card amber">
+            <h3>Invalid address</h3>
+            <div class="code">idx === -1
+
+errors.push(
+  <span class="danger">`node "${cmd.nodeId}" not found`</span>
+)
+
+<span class="comment">No mutation occurs</span></div>
+          </article>
+        </div>
+
+        <div class="probe">
+          <article class="card">
+            <h3>Try exact UUID targeting</h3>
+            <p>Two nodes intentionally have the same name. Select the command to see why the UUID matters.</p>
+            <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px">
+              <button onclick="runProbe('valid')">Rename UUID ...AAA</button>
+              <button onclick="runProbe('other')">Rename UUID ...BBB</button>
+              <button onclick="runProbe('bad')">Use unknown UUID</button>
+            </div>
+          </article>
+          <article class="card">
+            <h3>Executor result</h3>
+            <div class="probe-result" id="probeResult">Choose a command.</div>
+          </article>
+        </div>
+
+        <div class="callout ok">
+          <strong>Hierarchy is separately validated</strong>
+          <code>REPARENT_NODE</code> requires the new parent to exist and have <code>level === node.level - 1</code>. <code>ADD_NODE</code> performs the same parent-level check before inserting locally.
+        </div>
+      </section>
+
+      <section class="page" id="commands">
+        <div class="eyebrow">06 · Command runtime</div>
+        <h1>From LLM JSON to an edited canvas</h1>
+        <p class="lead">Commands are plain JSON mutation instructions. The LLM proposes them; deterministic application code validates and executes them.</p>
+
+        <div class="flow">
+          <div class="step"><div class="rail"><div class="dot">1</div></div><div class="step-body"><h3>AIMapEditor builds request</h3><p>Sends user prompt, current capabilities, nodeStyles, legend, mode and up to 20 history turns to <code>POST /api/transform</code>.</p><div class="meta">Browser → Next.js API</div></div></div>
+          <div class="step"><div class="rail"><div class="dot">2</div></div><div class="step-body"><h3>Server builds system prompt</h3><p>Command definitions, rules, legend and a textual diagram tree containing exact IDs are assembled.</p><div class="meta">promptBuilder.ts</div></div></div>
+          <div class="step"><div class="rail"><div class="dot">3</div></div><div class="step-body"><h3>OpenAI returns JSON</h3><p>Command mode expects <code>{ commands: DiagramCommand[], summary }</code>. Suggest mode wraps one command in each proposal.</p><div class="meta">gpt-4.1-mini · response_format=json_object</div></div></div>
+          <div class="step"><div class="rail"><div class="dot">4</div></div><div class="step-body"><h3>Dashboard separates legend commands</h3><p><code>SET_LEGEND</code> and <code>REMOVE_LEGEND</code> update the Zustand legend. Other commands go to <code>executeCommands()</code>.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">5</div></div><div class="step-body"><h3>Executor validates and mutates copies</h3><p>Structural commands change the capability array. Style/note patches change the nodePatches map. Errors are returned and shown as toasts.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">6</div></div><div class="step-body"><h3>pushUndoAndSet updates local state</h3><p>Previous state enters the undo stack; React state and Zustand receive the result; <code>isDirty=true</code>.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">7</div></div><div class="step-body"><h3>ReactFlow rebuilds</h3><p>The changed capability array is transformed into nodes again and style patches are merged into node data.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">8</div></div><div class="step-body"><h3>User clicks Apply</h3><p>Only then does <code>/api/catalogs/save</code> replace the database capabilities and create a version snapshot.</p></div></div>
+        </div>
+
+        <h2>Command effect matrix</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Command</th><th>Address fields</th><th>Local effect</th><th>Validation</th></tr></thead>
+            <tbody>
+              <tr><td>SET_STYLE</td><td>nodeId</td><td>Patch fill/border</td><td>Node must exist</td></tr>
+              <tr><td>SET_TEXT_COLOR</td><td>nodeId</td><td>Patch textColor</td><td>Node must exist</td></tr>
+              <tr><td>RESET_STYLE</td><td>nodeId</td><td>Delete patch keys</td><td>Node must exist</td></tr>
+              <tr><td>SET_NOTE</td><td>nodeId</td><td>Patch note</td><td>Node must exist</td></tr>
+              <tr><td>SET_DESCRIPTION</td><td>nodeId</td><td>Update capability + patch</td><td>Node must exist</td></tr>
+              <tr><td>RENAME_NODE</td><td>nodeId</td><td>Update capability name</td><td>Node must exist</td></tr>
+              <tr><td>REPARENT_NODE</td><td>nodeId, newParentId</td><td>Change parent and ordering</td><td>Both exist; levels compatible</td></tr>
+              <tr><td>DELETE_NODE</td><td>nodeId</td><td>Remove subtree or lift children</td><td>Node must exist</td></tr>
+              <tr><td>ADD_NODE</td><td>tempId, parentId</td><td>Append capability</td><td>Parent exists; level compatible</td></tr>
+              <tr><td>SET/REMOVE_LEGEND</td><td>entryId</td><td>Update legend arrays</td><td>Handled outside executor</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout info">
+          <strong>The LLM never directly calls ReactFlow or the database</strong>
+          It emits data. Application code owns validation, undo, Zustand updates, ReactFlow rendering and persistence.
+        </div>
+      </section>
+
+      <section class="page" id="existing">
+        <div class="eyebrow">07 · Existing diagram</div>
+        <h1>How LLM commands edit an existing diagram</h1>
+        <p class="lead">This path uses the UUIDs already loaded from the database into the browser.</p>
+
+        <div class="flow">
+          <div class="step"><div class="rail"><div class="dot">1</div></div><div class="step-body"><h3>Load catalog by ID</h3><p><code>GET /api/catalogs/:catalogId</code> returns catalog metadata, node_styles, chat_history and ordered capability rows.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">2</div></div><div class="step-body"><h3>Hydrate Zustand and dashboard state</h3><p>The UUIDs returned by Supabase become the IDs used by ReactFlow nodes and the style map.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">3</div></div><div class="step-body"><h3>Send live state to transform API</h3><p>AIMapEditor reads <code>useCatalogStore.getState().capabilities</code> at request time, avoiding an old prop snapshot.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">4</div></div><div class="step-body"><h3>LLM sees names plus UUIDs</h3><p>For command mode the server may trim deep nodes by relevance; selected nodes are force-included. Chat/suggest mode sends all nodes.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">5</div></div><div class="step-body"><h3>Executor finds exact UUID</h3><p>If it exists and validation passes, the command changes local state. Otherwise the canvas remains unchanged for that command.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">6</div></div><div class="step-body"><h3>Apply persists complete state</h3><p>The full post-command capability array and style map are sent to the save API.</p></div></div>
+        </div>
+
+        <div class="code"><span class="comment">Example: move L2 "Payments" under L1 "Digital Banking"</span>
+{
+  <span class="key">"type"</span>: <span class="str">"REPARENT_NODE"</span>,
+  <span class="key">"nodeId"</span>: <span class="str">"payments-uuid"</span>,
+  <span class="key">"newParentId"</span>: <span class="str">"digital-banking-uuid"</span>
+}
+
+<span class="comment">Executor checks:</span>
+1. payments-uuid exists
+2. digital-banking-uuid exists
+3. Digital Banking level === Payments level - 1
+4. drag/drop hierarchy logic accepts the move
+5. parent_id and sort_order are updated locally</div>
+      </section>
+
+      <section class="page" id="template">
+        <div class="eyebrow">08 · Template transcript</div>
+        <h1>How commands survive template cloning</h1>
+        <p class="lead">The transcript LLM analyzes the original template, but the user must receive a new independent catalog. The application bridges those two UUID spaces.</p>
+
+        <div class="flow">
+          <div class="step"><div class="rail"><div class="dot">1</div></div><div class="step-body"><h3>Pipeline loads template rows</h3><p><code>template_id</code> identifies a catalog. Its capabilities are fetched with original template UUIDs.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">2</div></div><div class="step-body"><h3>Pass 2 receives template YAML</h3><p>Every node includes its original UUID, name and level. The LLM returns command proposals using those UUIDs.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">3</div></div><div class="step-body"><h3>User reviews proposals</h3><p>Commands remain stored in <code>transcript_proposals.payload</code>, still addressed to original template IDs.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">4</div></div><div class="step-body"><h3>Apply creates a new catalog</h3><p><code>applyNewFromTemplate()</code> inserts a separate capability_catalogs row for the user.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">5</div></div><div class="step-body"><h3>Clone creates fresh node UUIDs</h3><p>Each original template node receives a new UUID. Parent IDs are remapped during copy.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">6</div></div><div class="step-body"><h3>Remap every command address</h3><p><code>nodeId</code>, <code>parentId</code>, <code>newParentId</code> and <code>insertAfterId</code> are changed from old template IDs to cloned IDs.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">7</div></div><div class="step-body"><h3>Execute against cloned capabilities</h3><p>The same deterministic <code>executeCommands()</code> now sees matching IDs in the cloned tree.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">8</div></div><div class="step-body"><h3>Persist result and transcript highlights</h3><p>Structural changes, node_styles, amber borders, legend and proposal statuses are written to the new catalog.</p></div></div>
+        </div>
+
+        <h2>The crucial ID translation</h2>
+        <div class="id-map">
+          <div class="id-box"><strong>Template node</strong><br><code>T-RISK-001</code><br>Risk Management</div>
+          <div class="id-arrow">→</div>
+          <div class="id-box"><strong>Cloned node</strong><br><code>C-RISK-901</code><br>Risk Management</div>
+          <div class="id-box"><strong>LLM proposal</strong><br><code>nodeId: T-RISK-001</code></div>
+          <div class="id-arrow">→</div>
+          <div class="id-box"><strong>Executed command</strong><br><code>nodeId: C-RISK-901</code></div>
+        </div>
+
+        <div class="code"><span class="comment">Built before cloning</span>
+oldToNew = {
+  <span class="str">"T-ROOT-001"</span> → <span class="str">"C-ROOT-901"</span>,
+  <span class="str">"T-RISK-001"</span> → <span class="str">"C-RISK-901"</span>
+}
+
+<span class="comment">Original LLM command</span>
+{ type: <span class="str">"RENAME_NODE"</span>, nodeId: <span class="str">"T-RISK-001"</span>, newName: <span class="str">"Enterprise Risk"</span> }
+
+<span class="comment">After remap, before executor</span>
+{ type: <span class="str">"RENAME_NODE"</span>, nodeId: <span class="str">"C-RISK-901"</span>, newName: <span class="str">"Enterprise Risk"</span> }</div>
+
+        <div class="callout warn">
+          <strong>Fallback behavior</strong>
+          If a proposal contains a node name instead of a template UUID, template apply tries a case-insensitive name-to-new-ID lookup. If neither UUID nor name resolves, the value passes through and the executor reports “node not found.”
+        </div>
+      </section>
+
+      <section class="page" id="versions">
+        <div class="eyebrow">09 · Save and restore</div>
+        <h1>Current state versus version snapshots</h1>
+        <p class="lead">The capabilities table represents current state. visual_maps preserves Apply-time snapshots for history and restore.</p>
+
+        <div class="grid two">
+          <article class="card green">
+            <span class="pill">Current</span>
+            <h3>capabilities + node_styles</h3>
+            <p>Read when opening the dashboard. This is the mutable current diagram used by normal editing and AI prompts.</p>
+          </article>
+          <article class="card violet">
+            <span class="pill">History</span>
+            <h3>visual_maps.layout_data</h3>
+            <p>Every normal Apply inserts a version containing a capability snapshot and nodeStyles, with one version marked active.</p>
+          </article>
+        </div>
+
+        <div class="code"><span class="comment">visual_maps.layout_data</span>
+{
+  <span class="key">"capabilities"</span>: [
+    { <span class="key">"id"</span>: <span class="str">"db-uuid"</span>, <span class="key">"parent_id"</span>: <span class="num">null</span>, <span class="key">"level"</span>: <span class="num">0</span>, ... }
+  ],
+  <span class="key">"nodeStyles"</span>: {
+    <span class="str">"db-uuid"</span>: { <span class="key">"fill"</span>: <span class="str">"#dbeafe"</span> }
+  }
+}</div>
+
+        <div class="flow">
+          <div class="step"><div class="rail"><div class="dot">1</div></div><div class="step-body"><h3>User selects a version</h3><p>Restore API loads the chosen visual_maps.layout_data snapshot.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">2</div></div><div class="step-body"><h3>Replace current capabilities</h3><p>The route deletes current rows and reinserts snapshot capabilities level-by-level.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">3</div></div><div class="step-body"><h3>Restore node_styles and active version</h3><p>Catalog styles are updated; selected visual map becomes active.</p></div></div>
+          <div class="step"><div class="rail"><div class="dot">4</div></div><div class="step-body"><h3>Dashboard replaces local state</h3><p>Undo/redo stacks are cleared and the restored capabilities/styles become the visible diagram.</p></div></div>
+        </div>
+      </section>
+
+      <section class="page" id="caveats">
+        <div class="eyebrow">10 · Analysis notes</div>
+        <h1>Observed implementation caveats</h1>
+        <p class="lead">These points are based on the current implementation and matter when reasoning about IDs and persistence.</p>
+
+        <div class="callout risk">
+          <strong>1. Browser IDs are not refreshed after normal Apply</strong>
+          The save route creates fresh database node UUIDs and remaps stored parents/styles, but returns only catalog/version IDs. The dashboard calls <code>markSaved()</code> without replacing its in-memory capabilities with the newly inserted rows. Reopening the catalog reloads correct IDs; continuing immediately after Apply may use stale browser IDs.
+        </div>
+        <div class="callout warn">
+          <strong>2. Every Apply regenerates IDs</strong>
+          Existing capability rows are deleted and reinserted. Stable UUID identity across versions would normally require upsert/update/delete-by-diff rather than full replacement.
+        </div>
+        <div class="callout warn">
+          <strong>3. Legend persistence follows a separate path</strong>
+          The dashboard's normal save body contains capabilities and nodeStyles, not legend. Legend lives in Zustand and is also placed in <code>chat_history.legend</code> by transcript and chat-history flows. This should be treated as a distinct persistence concern.
+        </div>
+        <div class="callout warn">
+          <strong>4. AI notes can live in node_styles</strong>
+          <code>SET_NOTE</code> writes a patch rather than <code>capabilities.note</code>. Manual notes and transcript TODOs use the capability column. A single canonical storage location would simplify load/save and reporting.
+        </div>
+        <div class="callout info">
+          <strong>5. Transcript edit persistence differs from normal Apply</strong>
+          <code>applyEdit()</code> updates/inserts/soft-deletes targeted capability rows directly, preserving existing UUIDs. Normal dashboard Apply performs full delete/reinsert and version creation. These are two different persistence strategies.
+        </div>
+
+        <h2>Recommended mental checklist</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Question</th><th>Where to look</th></tr></thead>
+            <tbody>
+              <tr><td>Which diagram owns this node?</td><td><code>capabilities.catalog_id</code></td></tr>
+              <tr><td>Which node is its parent?</td><td><code>capabilities.parent_id</code></td></tr>
+              <tr><td>How are children found?</td><td>Filter rows by parent_id</td></tr>
+              <tr><td>How does the LLM identify it?</td><td>UUID rendered into the prompt tree</td></tr>
+              <tr><td>Who validates the command?</td><td><code>executeCommands()</code>, not the LLM</td></tr>
+              <tr><td>When does DB mutation happen?</td><td>Apply button, or transcript apply route</td></tr>
+              <tr><td>Why does it appear at that x/y?</td><td><code>buildCanvasNodes()</code> layout calculation</td></tr>
+              <tr><td>Where is its background stored?</td><td><code>capability_catalogs.node_styles[nodeId].fill</code></td></tr>
+              <tr><td>Where is history stored?</td><td><code>visual_maps.layout_data</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const pages = [
+      ["concept", "Catalog = diagram"],
+      ["node", "Node anatomy"],
+      ["tree", "Tree construction"],
+      ["database", "Database storage"],
+      ["identity", "UUID targeting"],
+      ["commands", "Command runtime"],
+      ["existing", "Existing diagram AI"],
+      ["template", "Template transcript"],
+      ["versions", "Versions and restore"],
+      ["caveats", "Observed caveats"]
+    ];
+
+    function buildNav(container, compact) {
+      pages.forEach(([id, label], index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.page = id;
+        button.innerHTML = compact
+          ? `${index + 1}. ${label}`
+          : `<span class="nav-no">${String(index + 1).padStart(2, "0")}</span><span>${label}</span>`;
+        button.addEventListener("click", () => showPage(id));
+        container.appendChild(button);
+      });
+    }
+
+    function showPage(id) {
+      document.querySelectorAll(".page").forEach(page => page.classList.toggle("active", page.id === id));
+      document.querySelectorAll("[data-page]").forEach(button => button.classList.toggle("active", button.dataset.page === id));
+      history.replaceState(null, "", `#${id}`);
+      window.scrollTo({ top: 0, behavior: "auto" });
+    }
+
+    function runProbe(kind) {
+      const output = document.getElementById("probeResult");
+      const nodes = [
+        { id: "...AAA", name: "Payments" },
+        { id: "...BBB", name: "Payments" }
+      ];
+      if (kind === "bad") {
+        output.textContent = 'ERROR\nRENAME_NODE: node "...ZZZ" not found\n\nResult: no node changed.';
+        return;
+      }
+      const target = kind === "valid" ? "...AAA" : "...BBB";
+      const result = nodes.map(node => node.id === target ? { ...node, name: "Payment Services" } : node);
+      output.textContent = `COMMAND nodeId=${target}\n\n${JSON.stringify(result, null, 2)}\n\nOnly the exact UUID changed.`;
+    }
+
+    buildNav(document.getElementById("sideNav"), false);
+    buildNav(document.getElementById("mobileNav"), true);
+    const initial = location.hash.slice(1);
+    showPage(pages.some(([id]) => id === initial) ? initial : "concept");
+  </script>
+</body>
+</html>

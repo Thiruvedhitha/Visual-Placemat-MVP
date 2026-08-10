@@ -89,8 +89,8 @@ export async function deleteClient(clientId: string): Promise<void> {
 
 // ─── Client Members ─────────────────────────────────────────
 
-/** Get all members of a client */
-export async function getClientMembers(clientId: string): Promise<ClientMember[]> {
+/** Get all members of a client, enriched with email and display_name from user_profiles */
+export async function getClientMembers(clientId: string): Promise<(ClientMember & { email: string; display_name: string })[]> {
   const db = getSupabaseAdmin();
   const { data, error } = await db
     .from("client_members")
@@ -99,7 +99,21 @@ export async function getClientMembers(clientId: string): Promise<ClientMember[]
     .order("created_at");
 
   if (error) throw error;
-  return (data ?? []) as ClientMember[];
+  const members = (data ?? []) as ClientMember[];
+  if (members.length === 0) return [];
+
+  const userIds = members.map((m) => m.user_id);
+  const { data: profiles } = await db
+    .from("user_profiles")
+    .select("user_id, email, display_name")
+    .in("user_id", userIds);
+
+  const profileMap = new Map((profiles ?? []).map((p) => [p.user_id, p]));
+  return members.map((m) => ({
+    ...m,
+    email:        profileMap.get(m.user_id)?.email        ?? m.user_id,
+    display_name: profileMap.get(m.user_id)?.display_name ?? "",
+  }));
 }
 
 /** Get user's role in a client (null if not a member) */
@@ -218,14 +232,21 @@ export async function moveCatalogToClient(
   if (error) throw error;
 }
 
-/** Look up a user by email (for member invitations) */
+/** Look up a user by email — first tries user_profiles, then falls back to auth.admin.listUsers */
 export async function findUserByEmail(email: string): Promise<{ id: string; email: string } | null> {
   const db = getSupabaseAdmin();
+
+  // Fast path: user_profiles table (populated after migration)
+  const { data: profile } = await db
+    .from("user_profiles")
+    .select("user_id, email")
+    .eq("email", email.toLowerCase().trim())
+    .maybeSingle();
+  if (profile) return { id: profile.user_id, email: profile.email };
+
+  // Fallback: auth.admin.listUsers (O(n), kept until all profiles are synced)
   const { data, error } = await db.auth.admin.listUsers();
   if (error) throw error;
-
-  const user = data.users.find(
-    (u) => u.email?.toLowerCase() === email.toLowerCase()
-  );
+  const user = data.users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
   return user ? { id: user.id, email: user.email! } : null;
 }

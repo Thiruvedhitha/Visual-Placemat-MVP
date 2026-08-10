@@ -9,6 +9,7 @@ export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -16,7 +17,12 @@ export default function Navbar() {
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
-    supabase.auth.getUser().then(({ data }) => setUser(data.user));
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user);
+      if (data.user) {
+        fetch("/api/profile").then((r) => r.json()).then((p) => setIsAdmin(p.platformRole === "admin"));
+      }
+    });
   }, []);
 
   // Close dropdown on outside click
@@ -104,6 +110,14 @@ export default function Navbar() {
             >
               My Works
             </Link>
+            {isAdmin && (
+              <Link
+                href="/admin"
+                className="rounded-full px-3.5 py-1 text-sm font-medium text-red-300 hover:bg-white/10 hover:text-red-100"
+              >
+                Admin
+              </Link>
+            )}
           </div>
         </div>
 

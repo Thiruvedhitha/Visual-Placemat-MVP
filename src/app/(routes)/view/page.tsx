@@ -8,7 +8,9 @@ import "reactflow/dist/style.css";
 import { buildCanvasNodes } from "@/lib/canvas/layoutEngine";
 import CapabilityNode, { type CapabilityNodeData } from "@/components/canvas/CapabilityNode";
 import LeftSidebar from "@/components/canvas/LeftSidebar";
-import type { Capability } from "@/types/capability";
+import { resolveCapabilityCategoryStyles } from "@/lib/capabilityStyles";
+import type { NodeStylePatch } from "@/lib/commands";
+import type { Capability, CapabilityStyleCategory } from "@/types/capability";
 
 const NODE_TYPES = { capability: CapabilityNode };
 
@@ -193,7 +195,8 @@ function ViewContent() {
   const catalogId = searchParams.get("catalogId");
   const [capabilities, setCapabilities] = useState<Capability[]>([]);
   const [catalogName, setCatalogName] = useState("");
-  const [nodeStyles, setNodeStyles] = useState<Record<string, { fill?: string; border?: string }>>({});
+  const [nodeStyles, setNodeStyles] = useState<Record<string, NodeStylePatch>>({});
+  const [styleCategories, setStyleCategories] = useState<CapabilityStyleCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [visibleLevels, setVisibleLevels] = useState<Set<number>>(new Set([0, 1, 2, 3]));
@@ -228,6 +231,7 @@ function ViewContent() {
         if (data.catalog.node_styles && typeof data.catalog.node_styles === "object") {
           setNodeStyles(data.catalog.node_styles);
         }
+        setStyleCategories(Array.isArray(data.styleCategories) ? data.styleCategories : []);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load catalog");
       } finally {
@@ -240,8 +244,9 @@ function ViewContent() {
 
   const nodes = useMemo(() => {
     const raw = buildCanvasNodes(capabilities, visibleLevels);
+    const categoryStyles = resolveCapabilityCategoryStyles(capabilities, styleCategories);
     return raw.map((n) => {
-      const styles = nodeStyles[n.id];
+      const styles = { ...(categoryStyles[n.id] ?? {}), ...(nodeStyles[n.id] ?? {}) };
       if (styles) {
         return {
           ...n,
@@ -249,12 +254,13 @@ function ViewContent() {
             ...n.data,
             fill: styles.fill ?? n.data.fill,
             border: styles.border ?? n.data.border,
+            textColor: styles.textColor ?? n.data.textColor,
           },
         };
       }
       return n;
     });
-  }, [capabilities, visibleLevels, nodeStyles]);
+  }, [capabilities, visibleLevels, nodeStyles, styleCategories]);
 
   const selectedNode = useMemo(() => {
     if (!selectedNodeId) return null;

@@ -2,7 +2,13 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import TemplatePickerModal from "./TemplatePickerModal";
+
+const TranscriptReviewModal = dynamic(
+  () => import("@/components/transcript/TranscriptReviewModal"),
+  { ssr: false }
+);
 
 const cards = [
   {
@@ -35,10 +41,11 @@ const aiCard = {
 export default function EntryCards() {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [templateOpen, setTemplateOpen] = useState(false);
+  const [transcriptOpen, setTranscriptOpen] = useState(false);
 
   return (
     <>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-5">
         {/* ── Upload card ── */}
         {cards.map((card) => {
           const isHovered = hoveredId === card.id;
@@ -75,6 +82,46 @@ export default function EntryCards() {
             </Link>
           );
         })}
+
+        {/* ── Transcript card ── */}
+        {(() => {
+          const transcriptId = "transcript";
+          const isHovered = hoveredId === transcriptId;
+          return (
+            <button
+              type="button"
+              onClick={() => setTranscriptOpen(true)}
+              onMouseEnter={() => setHoveredId(transcriptId)}
+              onMouseLeave={() => setHoveredId(null)}
+              className={`
+                group relative flex flex-col items-center gap-3 rounded-2xl border-2 bg-white px-5 py-8 shadow-md
+                transition-all duration-200 ease-out cursor-pointer w-full
+                border-dashed border-purple-300 ring-1 ring-purple-100 hover:border-purple-400 hover:shadow-lg
+                ${isHovered ? "scale-[1.03] -translate-y-1" : "scale-100 translate-y-0"}
+              `}
+            >
+              <div className={`flex h-14 w-14 items-center justify-center rounded-xl bg-purple-50 transition-transform duration-200 ${isHovered ? "scale-110" : ""}`}>
+                <svg className="h-8 w-8 text-purple-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+                </svg>
+              </div>
+              <div className="text-center">
+                <span className="block text-sm font-semibold text-slate-800 group-hover:text-purple-700">
+                  Start with Transcript
+                </span>
+                <span className="mt-0.5 block text-xs text-slate-400">
+                  Paste meeting notes → auto-generate diagram
+                </span>
+              </div>
+              <svg
+                className={`absolute bottom-2.5 right-2.5 h-4 w-4 text-purple-400 transition-all duration-200 ${isHovered ? "translate-x-0 opacity-100" : "-translate-x-1 opacity-0"}`}
+                fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+              </svg>
+            </button>
+          );
+        })()}
 
         {/* ── AI prompt card — opens saved template picker ── */}
         {(() => {
@@ -116,6 +163,14 @@ export default function EntryCards() {
 
       {/* Template picker — no onSelect means it navigates to /dashboard */}
       <TemplatePickerModal open={templateOpen} onClose={() => setTemplateOpen(false)} />
+
+      {/* Transcript modal — new_diagram mode */}
+      {transcriptOpen && (
+        <TranscriptReviewModal
+          mode="new_diagram"
+          onClose={() => setTranscriptOpen(false)}
+        />
+      )}
     </>
   );
 }

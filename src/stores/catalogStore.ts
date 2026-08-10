@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Capability } from "@/types/capability";
+import type { Capability, CapabilityStyleCategory } from "@/types/capability";
 import type { NodeStylePatch } from "@/lib/commands/index";
 
 export interface LegendEntry {
@@ -32,6 +32,8 @@ export interface CatalogState {
   isDirty: boolean;
   /** Per-node visual overrides (fill, border) — keyed by node ID */
   nodeStyles: Record<string, NodeStylePatch>;
+  /** Catalog-owned categories referenced by capabilities */
+  styleCategories: CapabilityStyleCategory[];
   /** Color legend — fill and border category definitions */
   legend: LegendConfig;
 }
@@ -68,6 +70,9 @@ export interface CatalogActions {
   /** Patch a single node's styles */
   patchNodeStyle: (id: string, patch: Partial<NodeStylePatch>) => void;
 
+  /** Replace categories loaded for the current catalog */
+  setStyleCategories: (categories: CapabilityStyleCategory[]) => void;
+
   /** Replace the entire legend config */
   setLegend: (legend: LegendConfig) => void;
 }
@@ -79,6 +84,7 @@ const initialState: CatalogState = {
   capabilities: [],
   isDirty: false,
   nodeStyles: {},
+  styleCategories: [],
   legend: DEFAULT_LEGEND,
 };
 
@@ -93,6 +99,7 @@ export const useCatalogStore = create<CatalogState & CatalogActions>()(
           catalogName: name,
           industry,
           capabilities,
+          styleCategories: [],
           isDirty: true,
         }),
 
@@ -101,6 +108,7 @@ export const useCatalogStore = create<CatalogState & CatalogActions>()(
           catalogId,
           catalogName: name,
           capabilities,
+          styleCategories: [],
           isDirty: false,
         }),
 
@@ -133,15 +141,21 @@ export const useCatalogStore = create<CatalogState & CatalogActions>()(
           isDirty: true,
         })),
 
+      setStyleCategories: (styleCategories) => set({ styleCategories }),
+
       setLegend: (legend) => set({ legend }),
     }),
     {
       name: "visual-placemat-catalog",
-      version: 2,
-      migrate: (persisted: unknown) => {
+      version: 3,
+      migrate: (persisted: unknown, version) => {
         // v1 → v2: clear pre-defined legend defaults so legend starts blank
         const state = persisted as Partial<CatalogState>;
-        return { ...state, legend: DEFAULT_LEGEND };
+        return {
+          ...state,
+          ...(version < 2 ? { legend: DEFAULT_LEGEND } : {}),
+          styleCategories: state.styleCategories ?? [],
+        };
       },
     }
   )

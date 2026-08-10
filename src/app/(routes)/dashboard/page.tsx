@@ -24,13 +24,15 @@ import AIMapEditor from "@/components/canvas/AIMapEditor";
 import AddNodeWizard from "@/components/canvas/AddNodeWizard";
 import { showToast } from "@/components/ui/Toast";
 import VersionHistoryPanel from "@/components/canvas/VersionHistoryPanel";
+import CatalogNotesPanel from "@/components/canvas/CatalogNotesPanel";
 import SaveAsTemplateModal from "@/components/canvas/SaveAsTemplateModal";
 import TemplatePickerModal from "@/components/ui/TemplatePickerModal";
 import { buildCanvasNodes } from "@/lib/canvas/layoutEngine";
 import { handleNodeDragDrop } from "@/lib/canvas/dragDropHandler";
 import { executeCommands } from "@/lib/commands/executor";
 import type { DiagramCommand, NodeStylePatch } from "@/lib/commands/index";
-import type { Capability } from "@/types/capability";
+import { mergeNodeStyleMaps, mergeStyleCategoryLegend, resolveCapabilityCategoryStyles } from "@/lib/capabilityStyles";
+import type { Capability, CapabilityStyleCategory } from "@/types/capability";
 import { useCatalogStore } from "@/stores/catalogStore";
 import type { LegendEntry } from "@/stores/catalogStore";
 
@@ -170,6 +172,8 @@ function DashboardContent() {
   const storeCatalogId = useCatalogStore((s) => s.catalogId);
   const catalogName = useCatalogStore((s) => s.catalogName);
   const isDirty = useCatalogStore((s) => s.isDirty);
+  const styleCategories = useCatalogStore((s) => s.styleCategories);
+  const legend = useCatalogStore((s) => s.legend);
   const loadFromDB = useCatalogStore((s) => s.loadFromDB);
   const markSaved = useCatalogStore((s) => s.markSaved);
 
@@ -222,12 +226,15 @@ function DashboardContent() {
 
   // Wrapper that syncs local state to Zustand store (does NOT push undo — use pushUndoAndSet for that)
   const setNodeStyles = useCallback((updater: Record<string, NodeStylePatch> | ((prev: Record<string, NodeStylePatch>) => Record<string, NodeStylePatch>)) => {
-    setNodeStylesLocal((prev) => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      useCatalogStore.setState({ nodeStyles: next });
-      return next;
-    });
+    const next = typeof updater === "function" ? updater(nodeStylesRef.current) : updater;
+    nodeStylesRef.current = next;
+    setNodeStylesLocal(next);
+    useCatalogStore.setState({ nodeStyles: next, isDirty: true });
   }, []);
+  const categoryStyles = useMemo(
+    () => resolveCapabilityCategoryStyles(capabilities, styleCategories),
+    [capabilities, styleCategories]
+  );
   // AI Map Editor panel state
   const [aiPanelOpen, setAiPanelOpen] = useState(isAiMode);
   const [aiPickMode, setAiPickMode] = useState(false);
@@ -236,6 +243,7 @@ function DashboardContent() {
   const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(false);
   // Version history panel
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
   const [historyKey, setHistoryKey] = useState(0); // increment to force panel refresh
   const [dropIndicator, setDropIndicator] = useState<{ x: number; y: number; width: number; targetId: string; mode: "after" | "into"; insertAfterId: string | null; newParentId: string | null } | null>(null);
   const dropIndicatorRef = useRef(dropIndicator);
@@ -286,10 +294,23 @@ function DashboardContent() {
           setUndoStack([]);
           setRedoStack([]);
           loadFromDB(catalogIdParam, data.catalog.name || catalogIdParam, data.capabilities);
-          // Load saved node styles from DB
-          if (data.catalog.node_styles && typeof data.catalog.node_styles === "object") {
-            setNodeStyles(data.catalog.node_styles);
-          }
+          const categories: CapabilityStyleCategory[] = Array.isArray(data.styleCategories)
+            ? data.styleCategories
+            : [];
+          const legacyLegend = data.catalog.chat_history?.legend ?? { fill: [], border: [], textColor: [] };
+          const categoryStyles = resolveCapabilityCategoryStyles(data.capabilities, categories);
+          const legacyStyles = data.catalog.node_styles && typeof data.catalog.node_styles === "object"
+            ? data.catalog.node_styles
+            : {};
+          const effectiveStyles = mergeNodeStyleMaps(categoryStyles, legacyStyles);
+          nodeStylesRef.current = effectiveStyles;
+          setNodeStylesLocal(effectiveStyles);
+          useCatalogStore.setState({
+            nodeStyles: effectiveStyles,
+            styleCategories: categories,
+            legend: mergeStyleCategoryLegend(legacyLegend, categories),
+            isDirty: false,
+          });
           // Set role: null → treat as viewer (safe default)
           setUserRole(data.userRole ?? null);
           dataLoadedRef.current = true;
@@ -439,7 +460,7 @@ function DashboardContent() {
     }
 
     const nextNodes = buildCanvasNodes(capabilities, visibleLevels).map((node) => {
-      const styles = nodeStyles[node.id];
+      const styles = { ...(categoryStyles[node.id] ?? {}), ...(nodeStyles[node.id] ?? {}) };
       const isSelected = selectedNodeIds.has(node.id);
       const isAiTarget = node.id === aiTargetNodeId;
       const level = node.data.level;
@@ -454,7 +475,7 @@ function DashboardContent() {
     });
 
     setNodes(nextNodes);
-  }, [capabilities, selectedNodeIds, aiTargetNodeId, aiPickMode, visibleLevels, nodeStyles]);
+  }, [capabilities, selectedNodeIds, aiTargetNodeId, aiPickMode, visibleLevels, nodeStyles, categoryStyles]);
 
   const onNodeDragStart: NodeDragHandler = useCallback((_, node) => {
     setSelectedNodeId(node.id);
@@ -946,6 +967,7 @@ function DashboardContent() {
           catalogName,
           capabilities,
           nodeStyles,
+          legend,
         }),
       });
       const data = await res.json();
@@ -1203,6 +1225,18 @@ function DashboardContent() {
               History
             </button>
           )}
+          {/* Diagram notes — only shown after first save */}
+          {storeCatalogId && (
+            <button
+              onClick={() => setNotesOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-amber-400 hover:text-amber-600"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487a2.1 2.1 0 1 1 2.97 2.97L7.5 19.79l-4 1 1-4 12.362-12.303Z" />
+              </svg>
+              Notes
+            </button>
+          )}
         </div>
       </header>
 
@@ -1340,21 +1374,23 @@ function DashboardContent() {
               </svg>
             </button>
 
-            {/* Single-select: full RightSidebar */}
-            {selectedNodeIds.size === 1 && selectedNodeId && (
+            {/* RightSidebar — always mounted so transcript button is accessible */}
+            {selectedNodeIds.size <= 1 && (
               <RightSidebar
                 node={
-                  selectedNode && selectedNode.type === "capability"
+                  selectedNodeIds.size === 1 && selectedNode && selectedNode.type === "capability"
                     ? { id: selectedNode.id, data: selectedNode.data as import("@/components/canvas/CapabilityNode").CapabilityNodeData }
                     : null
                 }
                 capabilities={capabilities}
                 nodeStyles={nodeStyles}
+                catalogId={storeCatalogId ?? undefined}
                 onUpdateNode={onUpdateNode}
                 onReparent={onReparent}
                 onDetachChild={onDetachChild}
                 onDeleteChild={onDeleteNode}
                 onDeleteNode={onDeleteNode}
+                onTranscriptApplied={() => window.location.reload()}
               />
             )}
 
@@ -1452,6 +1488,15 @@ function DashboardContent() {
           onClose={() => setSaveTemplateOpen(false)}
           capabilities={capabilities}
           defaultName={catalogName}
+        />
+      )}
+
+      {/* Catalog notes modal */}
+      {storeCatalogId && (
+        <CatalogNotesPanel
+          catalogId={storeCatalogId}
+          open={notesOpen}
+          onClose={() => setNotesOpen(false)}
         />
       )}
 

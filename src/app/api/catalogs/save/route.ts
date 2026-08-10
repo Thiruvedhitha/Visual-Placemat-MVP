@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, requireServerEnv } from "@/lib/db/postgres/client";
 import { getUser } from "@/lib/auth/getUser";
 import { getUserClientRole } from "@/lib/db/clients";
+import { ensureCapabilityStyleCategories } from "@/lib/capabilityStyles.server";
 
 /**
  * POST /api/catalogs/save
@@ -14,7 +15,7 @@ export async function POST(request: NextRequest) {
     requireServerEnv();
     const user = await getUser();
     const body = await request.json();
-    const { catalogId, catalogName, capabilities, nodeStyles } = body;
+    const { catalogId, catalogName, capabilities, nodeStyles, legend } = body;
 
     if (!catalogName || !Array.isArray(capabilities) || capabilities.length === 0) {
       return NextResponse.json(
@@ -50,13 +51,6 @@ export async function POST(request: NextRequest) {
         .update({ name: catalogName, updated_at: new Date().toISOString() })
         .eq("id", finalCatalogId);
 
-      // Delete old capabilities
-      const { error: delError } = await supabaseAdmin
-        .from("capabilities")
-        .delete()
-        .eq("catalog_id", finalCatalogId);
-
-      if (delError) throw new Error("Failed to clear old capabilities: " + delError.message);
     } else {
       // ── First-time save: create catalog record ──
       const { data: catalog, error: catError } = await supabaseAdmin
@@ -75,6 +69,32 @@ export async function POST(request: NextRequest) {
         throw new Error("Failed to create catalog: " + catError?.message);
       }
       finalCatalogId = catalog.id;
+    }
+
+    const stylePlan = await ensureCapabilityStyleCategories(supabaseAdmin, {
+      catalogId: finalCatalogId,
+      capabilityIds: capabilities.map((capability: { id: string }) => capability.id),
+      nodeStyles: nodeStyles && typeof nodeStyles === "object" ? nodeStyles : {},
+      legend,
+      source: "manual",
+      currentAssignments: Object.fromEntries(capabilities.map((capability: {
+        id: string;
+        fill_category_id?: string | null;
+        border_category_id?: string | null;
+        text_category_id?: string | null;
+      }) => [capability.id, {
+        fill_category_id: capability.fill_category_id ?? null,
+        border_category_id: capability.border_category_id ?? null,
+        text_category_id: capability.text_category_id ?? null,
+      }])),
+    });
+
+    if (catalogId) {
+      const { error: delError } = await supabaseAdmin
+        .from("capabilities")
+        .delete()
+        .eq("catalog_id", finalCatalogId);
+      if (delError) throw new Error("Failed to clear old capabilities: " + delError.message);
     }
 
     // ── Insert capabilities level-by-level for parent_id resolution ──
@@ -96,6 +116,9 @@ export async function POST(request: NextRequest) {
           note: string | null;
           sort_order: number;
           source: string;
+          fill_category_id?: string | null;
+          border_category_id?: string | null;
+          text_category_id?: string | null;
         }) => ({
           catalog_id: finalCatalogId,
           parent_id: c.parent_id ? (tempToReal.get(c.parent_id) ?? null) : null,
@@ -105,6 +128,9 @@ export async function POST(request: NextRequest) {
           note: c.note || null,
           sort_order: c.sort_order,
           source: c.source || "xlsx_import",
+          fill_category_id: stylePlan.assignments[c.id]?.fill_category_id ?? null,
+          border_category_id: stylePlan.assignments[c.id]?.border_category_id ?? null,
+          text_category_id: stylePlan.assignments[c.id]?.text_category_id ?? null,
         })
       );
 
@@ -131,9 +157,18 @@ export async function POST(request: NextRequest) {
         const realId = tempToReal.get(oldId) ?? oldId;
         remappedStyles[realId] = style;
       }
+      const { data: catalogState } = await supabaseAdmin
+        .from("capability_catalogs")
+        .select("chat_history")
+        .eq("id", finalCatalogId)
+        .single();
+      const chatHistory = catalogState?.chat_history ?? { map: [], commits: [] };
       const { error: styleError } = await supabaseAdmin
         .from("capability_catalogs")
-        .update({ node_styles: remappedStyles })
+        .update({
+          node_styles: remappedStyles,
+          chat_history: { ...chatHistory, legend: stylePlan.legend },
+        })
         .eq("id", finalCatalogId);
       if (styleError) console.error("Failed to update node_styles:", styleError.message);
     }
@@ -150,6 +185,9 @@ export async function POST(request: NextRequest) {
         level: number;
         sort_order: number;
         source: string;
+        fill_category_id?: string | null;
+        border_category_id?: string | null;
+        text_category_id?: string | null;
       }) => ({
         id: tempToReal.get(c.id) ?? c.id,
         parent_id: c.parent_id ? (tempToReal.get(c.parent_id) ?? c.parent_id) : null,
@@ -159,6 +197,9 @@ export async function POST(request: NextRequest) {
         note: c.note || null,
         sort_order: c.sort_order,
         source: c.source || "xlsx_import",
+        fill_category_id: stylePlan.assignments[c.id]?.fill_category_id ?? null,
+        border_category_id: stylePlan.assignments[c.id]?.border_category_id ?? null,
+        text_category_id: stylePlan.assignments[c.id]?.text_category_id ?? null,
       })
     );
 

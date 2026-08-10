@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUser } from "@/lib/auth/getUser";
 import { getUserClientRole } from "@/lib/db/clients";
 import { getSupabaseAdmin } from "@/lib/db/postgres/client";
+import { logAudit } from "@/lib/auth/audit";
 
 interface RouteParams {
   params: { clientId: string };
@@ -137,12 +138,44 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     const db = getSupabaseAdmin();
+
+    // Verify actor owns the diagram or is admin of its current folder
+    const { data: catalog } = await db
+      .from("capability_catalogs")
+      .select("user_id, client_id")
+      .eq("id", catalogId)
+      .single();
+
+    if (!catalog) return NextResponse.json({ error: "Catalog not found" }, { status: 404 });
+
+    const isOwner = catalog.user_id === user.id;
+    let sourceRole: string | null = null;
+    if (catalog.client_id) {
+      sourceRole = await getUserClientRole(catalog.client_id, user.id);
+    }
+    if (!isOwner && sourceRole !== "admin") {
+      return NextResponse.json(
+        { error: "You must own the diagram or be admin of its current folder to move it" },
+        { status: 403 }
+      );
+    }
+
     const { error } = await db
       .from("capability_catalogs")
       .update({ client_id: clientId, updated_at: new Date().toISOString() })
       .eq("id", catalogId);
 
     if (error) throw error;
+
+    await logAudit({
+      actorId:   user.id,
+      action:    "catalog.moved",
+      catalogId,
+      clientId,
+      previousValue: { client_id: catalog.client_id },
+      newValue:      { client_id: clientId },
+    });
+
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("PATCH /api/clients/[clientId]/catalogs error:", err);

@@ -33,7 +33,7 @@ export async function GET() {
     const catalogIds = catalogs.map((c) => c.id);
     const { data: capabilities, error: capError } = await supabaseAdmin
       .from("capabilities")
-      .select("id, catalog_id, parent_id, level, name, description, note, sort_order, source")
+      .select("id, catalog_id, parent_id, level, name, description, note, sort_order, source, fill_category_id, border_category_id, text_category_id")
       .in("catalog_id", catalogIds)
       .order("level", { ascending: true })
       .order("sort_order", { ascending: true });
@@ -42,11 +42,26 @@ export async function GET() {
       return NextResponse.json({ error: capError.message }, { status: 500 });
     }
 
+    const { data: styleCategories, error: styleCategoryError } = await supabaseAdmin
+      .from("capability_style_categories")
+      .select("*")
+      .in("catalog_id", catalogIds)
+      .order("created_at", { ascending: true });
+
+    if (styleCategoryError) {
+      return NextResponse.json({ error: styleCategoryError.message }, { status: 500 });
+    }
+
     // Group capabilities by catalog_id
     const capsByCatalog = new Map<string, typeof capabilities>();
     for (const cap of capabilities ?? []) {
       if (!capsByCatalog.has(cap.catalog_id)) capsByCatalog.set(cap.catalog_id, []);
       capsByCatalog.get(cap.catalog_id)!.push(cap);
+    }
+    const categoriesByCatalog = new Map<string, typeof styleCategories>();
+    for (const category of styleCategories ?? []) {
+      if (!categoriesByCatalog.has(category.catalog_id)) categoriesByCatalog.set(category.catalog_id, []);
+      categoriesByCatalog.get(category.catalog_id)!.push(category);
     }
 
     const templates = catalogs.map((catalog) => ({
@@ -54,6 +69,7 @@ export async function GET() {
       name: catalog.name,
       category: catalog.industry ?? "Other",
       nodeStyles: catalog.node_styles ?? {},
+      styleCategories: categoriesByCatalog.get(catalog.id) ?? [],
       nodeCount: (capsByCatalog.get(catalog.id) ?? []).length,
       capabilities: capsByCatalog.get(catalog.id) ?? [],
     }));

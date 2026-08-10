@@ -24,7 +24,7 @@ export async function GET(
     // Fetch catalog metadata (include client_id for role lookup)
     const { data: catalog, error: catError } = await supabaseAdmin
       .from("capability_catalogs")
-      .select("id, name, industry, created_at, node_styles, client_id")
+      .select("id, name, industry, created_at, node_styles, chat_history, client_id")
       .eq("id", catalogId)
       .single();
 
@@ -35,13 +35,23 @@ export async function GET(
     // Fetch capabilities
     const { data: capabilities, error: capError } = await supabaseAdmin
       .from("capabilities")
-      .select("id, parent_id, level, name, description, note, sort_order, source")
+      .select("id, parent_id, level, name, description, note, sort_order, source, fill_category_id, border_category_id, text_category_id")
       .eq("catalog_id", catalogId)
       .order("level", { ascending: true })
       .order("sort_order", { ascending: true });
 
     if (capError) {
       throw new Error("Failed to load capabilities: " + capError.message);
+    }
+
+    const { data: styleCategories, error: categoryError } = await supabaseAdmin
+      .from("capability_style_categories")
+      .select("id, catalog_id, slot, entry_key, label, color, source, source_id, created_by, created_at, updated_at")
+      .eq("catalog_id", catalogId)
+      .order("created_at", { ascending: true });
+
+    if (categoryError) {
+      throw new Error("Failed to load style categories: " + categoryError.message);
     }
 
     // Resolve the current user's role for the catalog's client
@@ -64,6 +74,7 @@ export async function GET(
     return NextResponse.json({
       catalog: catalogPublic,
       capabilities: capabilities || [],
+      styleCategories: styleCategories || [],
       userRole,
     });
   } catch (err: unknown) {

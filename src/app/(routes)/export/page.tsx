@@ -11,6 +11,7 @@ import { jsPDF } from "jspdf";
 import * as XLSX from "xlsx";
 import { useCatalogStore } from "@/stores/catalogStore";
 import { buildCanvasNodes } from "@/lib/canvas/layoutEngine";
+import { resolveCapabilityCategoryStyles } from "@/lib/capabilityStyles";
 import CapabilityNode from "@/components/canvas/CapabilityNode";
 import { showToast } from "@/components/ui/Toast";
 
@@ -135,13 +136,15 @@ function ExportContent() {
   const catalogName = useCatalogStore((s) => s.catalogName);
   const storeCatalogId = useCatalogStore((s) => s.catalogId);
   const nodeStyles = useCatalogStore((s) => s.nodeStyles);
+  const styleCategories = useCatalogStore((s) => s.styleCategories);
   const canvasRef = useRef<HTMLDivElement>(null);
   const [exporting, setExporting] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
 
   // Build nodes from store and apply persisted nodeStyles
+  const categoryStyles = resolveCapabilityCategoryStyles(capabilities, styleCategories);
   const nodes = buildCanvasNodes(capabilities, ALL_LEVELS).map((n) => {
-    const styles = nodeStyles[n.id];
+    const styles = { ...(categoryStyles[n.id] ?? {}), ...(nodeStyles[n.id] ?? {}) };
     if (styles) {
       return {
         ...n,
@@ -149,6 +152,7 @@ function ExportContent() {
           ...n.data,
           fill: styles.fill ?? n.data.fill,
           border: styles.border ?? n.data.border,
+          textColor: styles.textColor ?? n.data.textColor,
         },
       };
     }

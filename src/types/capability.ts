@@ -31,6 +31,23 @@ export interface CapabilityCatalog {
   updated_at: string;
 }
 
+export type CapabilityStyleSlot = "fill" | "border" | "textColor";
+export type CapabilityStyleSource = "manual" | "ai" | "transcript" | "migration";
+
+export interface CapabilityStyleCategory {
+  id: string;
+  catalog_id: string;
+  slot: CapabilityStyleSlot;
+  entry_key: string;
+  label: string;
+  color: string;
+  source: CapabilityStyleSource;
+  source_id: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Capability {
   id: string;
   catalog_id: string;
@@ -42,6 +59,9 @@ export interface Capability {
   sort_order: number;
   source: string;
   is_deleted: boolean;
+  fill_category_id?: string | null;
+  border_category_id?: string | null;
+  text_category_id?: string | null;
   created_at: string;
   updated_at: string;
 }

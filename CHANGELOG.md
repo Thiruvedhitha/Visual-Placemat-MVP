@@ -1,6 +1,52 @@
 # Changelog
 
-## [0.1.2] — 2026-04-21
+## [0.5.0] — 2026-08-04
+
+### Transcript Feature Enhancements
+
+#### Summary
+Five enhancements added on top of the working transcript → diagram pipeline.
+
+#### DB Migration required
+Run `scripts/migrations/2026-08-04_transcript_enhancements.sql` in Supabase SQL Editor (already done).
+Adds: `meeting_transcripts.context_prompt`, `meeting_transcripts.template_id`, `capability_catalogs.notes`.
+
+#### Files Changed
+
+| File | Change |
+|------|--------|
+| `src/components/transcript/TranscriptReviewModal.tsx` | Portal fix (`createPortal` to `document.body`); dynamic tab selection |
+| `src/components/transcript/TranscriptUpload.tsx` | Context prompt textarea; template picker dropdown (new_diagram only) |
+| `src/types/transcript.ts` | Added `context_prompt: string \| null` to `MeetingTranscript` |
+| `src/app/api/transcripts/route.ts` | Reads and stores `context_prompt`, `template_id` from request |
+| `src/lib/transcript/pipeline.ts` | Threads `context_prompt` to all 3 passes; loads template caps for hybrid flow |
+| `src/lib/transcript/pass1-filter.ts` | Accepts optional `contextPrompt`, appended to system prompt |
+| `src/lib/transcript/pass2-extract.ts` | Accepts `contextPrompt` in ctx, injected into both extractNew and extractEdit |
+| `src/lib/transcript/pass3-todos.ts` | Accepts optional `contextPrompt`, injected for todo ownership/priority |
+| `src/lib/transcript/applyNew.ts` | Creation stamp on every node; `applyNewFromTemplate` path (clone + commands) |
+| `src/lib/transcript/applyEdit.ts` | Change-tracking stamp on added/modified nodes |
+| `src/app/api/catalogs/[id]/notes/route.ts` | New — GET/PATCH endpoint for per-diagram notes |
+| `src/components/canvas/CatalogNotesPanel.tsx` | New — modal panel with auto-save textarea |
+| `src/app/(routes)/dashboard/page.tsx` | Notes button in toolbar; `CatalogNotesPanel` wired in |
+| `src/lib/db/postgres/schema.sql` | Replaced with live snapshot including all new columns |
+
+#### What each fix does
+
+**Fix 1 — Portal:** Modal was clipped by `overflow-hidden` sidebars. Now uses `createPortal(…, document.body)` so it always covers the full viewport.
+
+**Fix 2 — Context prompt:** Free-text textarea in the upload form lets users specify speaker roles, color rules, and meeting context. Injected into all three LLM passes so the AI can attribute capabilities to the right people and emit correct `SET_STYLE`/`SET_LEGEND` commands.
+
+**Fix 3 — Template selection:** In `new_diagram` mode, a dropdown lists built-in templates. When selected, the pipeline loads the template's capability tree and runs edit-mode extraction against it — producing `command` proposals instead of `node` proposals. `applyNew` clones the template catalog then applies the accepted commands.
+
+**Fix 4 — Change tracking:** Every node touched by a transcript apply gets a stamp in its `note` field: `"Added/Modified via transcript 'Title' on MM/DD/YYYY"`. Nodes created from scratch get `"Created via transcript …"`.
+
+**Fix 5 — Catalog notes:** A "Notes" button appears in the dashboard toolbar (after first save). Clicking opens `CatalogNotesPanel` — a full-screen modal with a textarea that auto-saves on blur and supports manual Save. Backed by `GET/PATCH /api/catalogs/[id]/notes`.
+
+**Fix 6 — Tab logic:** Review modal tabs are now derived from the actual proposals: shows **Commands** tab when command proposals exist (template mode), **Nodes** tab when node proposals exist, falling back to mode default.
+
+---
+
+
 
 ### Upload Page — UX Refinements, File Preview & Format Validation
 

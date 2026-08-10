@@ -1,206 +1,201 @@
--- ══════════════════════════════════════════════════════════════
--- Visual Placemat — Supabase Schema (MVP v3 — Multi-user)
--- Run this in your Supabase SQL Editor (Dashboard → SQL Editor)
--- ══════════════════════════════════════════════════════════════
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
 
--- Prerequisite: enable pgvector for RAG embeddings
-CREATE EXTENSION IF NOT EXISTS vector;
-
--- ── DROP old tables (order matters due to FK constraints) ───
--- Drop policies only on tables that previously existed
-DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'capability_catalogs') THEN
-    DROP POLICY IF EXISTS "access_catalogs" ON capability_catalogs;
-    DROP POLICY IF EXISTS "Allow all for authenticated" ON capability_catalogs;
-  END IF;
-  IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'capabilities') THEN
-    DROP POLICY IF EXISTS "access_capabilities" ON capabilities;
-    DROP POLICY IF EXISTS "Allow all for authenticated" ON capabilities;
-  END IF;
-  IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'visual_maps') THEN
-    DROP POLICY IF EXISTS "access_visual_maps" ON visual_maps;
-    DROP POLICY IF EXISTS "Allow all for authenticated" ON visual_maps;
-  END IF;
-  IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'diff_history') THEN
-    DROP POLICY IF EXISTS "access_diff_history" ON diff_history;
-    DROP POLICY IF EXISTS "Allow all for authenticated" ON diff_history;
-  END IF;
-  IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'prompt_sessions') THEN
-    DROP POLICY IF EXISTS "access_prompt_sessions" ON prompt_sessions;
-  END IF;
-END $$;
-
-DROP TABLE IF EXISTS catalog_shares CASCADE;
-DROP TABLE IF EXISTS prompt_sessions CASCADE;
-DROP TABLE IF EXISTS capability_chunks CASCADE;
-DROP TABLE IF EXISTS diff_history CASCADE;
-DROP TABLE IF EXISTS visual_maps CASCADE;
-DROP TABLE IF EXISTS capabilities CASCADE;
-DROP TABLE IF EXISTS capability_catalogs CASCADE;
-
--- ── 1. capability_catalogs ─────────────────────────────────
--- One row per uploaded Excel file, scoped to the user who uploaded it
-CREATE TABLE IF NOT EXISTS capability_catalogs (
-  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id      uuid REFERENCES auth.users(id) ON DELETE CASCADE,
-  name         text NOT NULL,              -- "AMEX Capability Map v1"
-  description  text,
-  client_name  text,                       -- "AMEX" (display only, not used in RAG)
-  industry     text,                       -- "Banking" — sent to RAG filter
-  status       text DEFAULT 'active',      -- "active" | "archived"
-  created_at   timestamptz DEFAULT now(),
-  updated_at   timestamptz DEFAULT now()
-);
-
--- ── 2. capabilities ────────────────────────────────────────
--- Hierarchical L0→L1→L2→L3, fully scoped to a catalog
-CREATE TABLE IF NOT EXISTS capabilities (
-  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  catalog_id  uuid NOT NULL REFERENCES capability_catalogs(id) ON DELETE CASCADE,
-  parent_id   uuid REFERENCES capabilities(id) ON DELETE SET NULL,
-  level       smallint NOT NULL CHECK (level BETWEEN 0 AND 3),
-  name        text NOT NULL,
+CREATE TABLE public.capability_catalogs (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid,
+  name text NOT NULL,
   description text,
-  sort_order  integer DEFAULT 0,
-  source      text DEFAULT 'xlsx_import',  -- "xlsx_import" | "ai_generated" | "manual"
-  is_deleted  boolean DEFAULT false,       -- soft delete for undo support
-  created_at  timestamptz DEFAULT now(),
-  updated_at  timestamptz DEFAULT now()
+  client_name text,
+  industry text,
+  status text DEFAULT 'active'::text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  node_styles jsonb DEFAULT '{}'::jsonb,
+  chat_history jsonb DEFAULT '{"map": []}'::jsonb,
+  client_id uuid,
+  notes text,
+  CONSTRAINT capability_catalogs_pkey PRIMARY KEY (id),
+  CONSTRAINT capability_catalogs_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT capability_catalogs_client_id_fkey FOREIGN KEY (client_id) REFERENCES public.clients(id)
 );
-CREATE INDEX IF NOT EXISTS idx_capabilities_catalog      ON capabilities(catalog_id);
-CREATE INDEX IF NOT EXISTS idx_capabilities_parent       ON capabilities(parent_id);
-CREATE INDEX IF NOT EXISTS idx_capabilities_level        ON capabilities(catalog_id, level);
-CREATE INDEX IF NOT EXISTS idx_capabilities_catalog_sort ON capabilities(catalog_id, sort_order);
-
--- Auto-update updated_at
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN NEW.updated_at = now(); RETURN NEW; END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS capabilities_updated_at ON capabilities;
-CREATE TRIGGER capabilities_updated_at
-  BEFORE UPDATE ON capabilities
-  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
--- ── 3. visual_maps ─────────────────────────────────────────
--- Each "Apply Changes" inserts a new row (version), old rows set is_active=false
-CREATE TABLE IF NOT EXISTS visual_maps (
-  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  catalog_id     uuid NOT NULL REFERENCES capability_catalogs(id) ON DELETE CASCADE,
-  name           text NOT NULL,
+CREATE TABLE public.capability_style_categories (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  catalog_id uuid NOT NULL,
+  slot text NOT NULL CHECK (slot = ANY (ARRAY['fill'::text, 'border'::text, 'textColor'::text])),
+  entry_key text NOT NULL,
+  label text NOT NULL,
+  color text NOT NULL CHECK (color ~ '^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$'::text),
+  source text NOT NULL DEFAULT 'manual'::text CHECK (source = ANY (ARRAY['manual'::text, 'ai'::text, 'transcript'::text, 'migration'::text])),
+  source_id uuid,
+  created_by uuid,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT capability_style_categories_pkey PRIMARY KEY (id),
+  CONSTRAINT capability_style_categories_catalog_id_fkey FOREIGN KEY (catalog_id) REFERENCES public.capability_catalogs(id),
+  CONSTRAINT capability_style_categories_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id),
+  CONSTRAINT capability_style_categories_catalog_slot_key UNIQUE (catalog_id, slot, entry_key),
+  CONSTRAINT capability_style_categories_catalog_id_id_key UNIQUE (catalog_id, id)
+);
+CREATE TABLE public.capabilities (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  catalog_id uuid NOT NULL,
+  parent_id uuid,
+  level smallint NOT NULL CHECK (level >= 0 AND level <= 3),
+  name text NOT NULL,
+  description text,
+  sort_order integer DEFAULT 0,
+  source text DEFAULT 'xlsx_import'::text,
+  is_deleted boolean DEFAULT false,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  note text,
+  fill_category_id uuid,
+  border_category_id uuid,
+  text_category_id uuid,
+  CONSTRAINT capabilities_pkey PRIMARY KEY (id),
+  CONSTRAINT capabilities_catalog_id_fkey FOREIGN KEY (catalog_id) REFERENCES public.capability_catalogs(id),
+  CONSTRAINT capabilities_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES public.capabilities(id),
+  CONSTRAINT capabilities_fill_category_fkey FOREIGN KEY (catalog_id, fill_category_id) REFERENCES public.capability_style_categories(catalog_id, id),
+  CONSTRAINT capabilities_border_category_fkey FOREIGN KEY (catalog_id, border_category_id) REFERENCES public.capability_style_categories(catalog_id, id),
+  CONSTRAINT capabilities_text_category_fkey FOREIGN KEY (catalog_id, text_category_id) REFERENCES public.capability_style_categories(catalog_id, id)
+);
+CREATE TABLE public.visual_maps (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  catalog_id uuid NOT NULL,
+  name text NOT NULL,
   version_number integer DEFAULT 1,
-  layout_data    jsonb,                    -- React Flow node/edge positions
-  is_active      boolean DEFAULT true,
-  thumbnail_url  text,
-  created_at     timestamptz DEFAULT now(),
-  updated_at     timestamptz DEFAULT now()
+  layout_data jsonb,
+  is_active boolean DEFAULT true,
+  thumbnail_url text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT visual_maps_pkey PRIMARY KEY (id),
+  CONSTRAINT visual_maps_catalog_id_fkey FOREIGN KEY (catalog_id) REFERENCES public.capability_catalogs(id)
 );
-CREATE INDEX IF NOT EXISTS idx_visual_maps_active ON visual_maps(catalog_id, is_active);
-
--- ── 4. diff_history ────────────────────────────────────────
--- Audit log: which prompt caused which changes
-CREATE TABLE IF NOT EXISTS diff_history (
-  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  catalog_id    uuid REFERENCES capability_catalogs(id) ON DELETE CASCADE,
-  applied_by    uuid REFERENCES auth.users(id) ON DELETE SET NULL,
-  prompt_text   text NOT NULL,
-  diff_payload  jsonb NOT NULL,            -- [{action, level, name, parent_id}...]
-  status        text DEFAULT 'applied',    -- "applied" | "cancelled" | "rolled_back"
-  model_used    text,                      -- "claude-sonnet-4" | "phi-3" etc.
-  visual_map_id uuid REFERENCES visual_maps(id) ON DELETE SET NULL,
-  created_at    timestamptz DEFAULT now(),
-  applied_at    timestamptz
+CREATE TABLE public.diff_history (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  catalog_id uuid,
+  applied_by uuid,
+  prompt_text text NOT NULL,
+  diff_payload jsonb NOT NULL,
+  status text DEFAULT 'applied'::text,
+  model_used text,
+  visual_map_id uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  applied_at timestamp with time zone,
+  CONSTRAINT diff_history_pkey PRIMARY KEY (id),
+  CONSTRAINT diff_history_catalog_id_fkey FOREIGN KEY (catalog_id) REFERENCES public.capability_catalogs(id),
+  CONSTRAINT diff_history_applied_by_fkey FOREIGN KEY (applied_by) REFERENCES auth.users(id),
+  CONSTRAINT diff_history_visual_map_id_fkey FOREIGN KEY (visual_map_id) REFERENCES public.visual_maps(id)
 );
-CREATE INDEX IF NOT EXISTS idx_diff_history_catalog ON diff_history(catalog_id);
-CREATE INDEX IF NOT EXISTS idx_diff_history_applied ON diff_history(applied_by);
-
--- ── 5. capability_chunks (RAG knowledge base) ──────────────
--- Shared across all users, filtered by industry tag at query time
-CREATE TABLE IF NOT EXISTS capability_chunks (
-  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  label             text NOT NULL,
-  level             text NOT NULL,
-  industry          text NOT NULL,         -- the isolation filter for RAG queries
-  content           text NOT NULL,         -- readable text sent to Claude
-  embedding         vector(1536),          -- pgvector column
-  source            text NOT NULL,         -- "template" | "client_map"
-  source_catalog_id uuid REFERENCES capability_catalogs(id) ON DELETE SET NULL,
-  created_at        timestamptz DEFAULT now()
+CREATE TABLE public.capability_chunks (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  label text NOT NULL,
+  level text NOT NULL,
+  industry text NOT NULL,
+  content text NOT NULL,
+  embedding USER-DEFINED,
+  source text NOT NULL,
+  source_catalog_id uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT capability_chunks_pkey PRIMARY KEY (id),
+  CONSTRAINT capability_chunks_source_catalog_id_fkey FOREIGN KEY (source_catalog_id) REFERENCES public.capability_catalogs(id)
 );
-CREATE INDEX IF NOT EXISTS idx_chunks_embedding
-  ON capability_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-CREATE INDEX IF NOT EXISTS idx_chunks_industry ON capability_chunks(industry);
-
--- ── 6. prompt_sessions ─────────────────────────────────────
--- Tracks every AI prompt for observability and debugging
-CREATE TABLE IF NOT EXISTS prompt_sessions (
-  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  catalog_id       uuid REFERENCES capability_catalogs(id) ON DELETE CASCADE,
-  user_id          uuid REFERENCES auth.users(id) ON DELETE SET NULL,
-  prompt           text NOT NULL,
-  model_used       text,
-  retry_count      smallint DEFAULT 0,
+CREATE TABLE public.prompt_sessions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  catalog_id uuid,
+  user_id uuid,
+  prompt text NOT NULL,
+  model_used text,
+  retry_count smallint DEFAULT 0,
   validation_error text,
-  latency_ms       integer,
-  created_at       timestamptz DEFAULT now()
+  latency_ms integer,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT prompt_sessions_pkey PRIMARY KEY (id),
+  CONSTRAINT prompt_sessions_catalog_id_fkey FOREIGN KEY (catalog_id) REFERENCES public.capability_catalogs(id),
+  CONSTRAINT prompt_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );
-CREATE INDEX IF NOT EXISTS idx_prompt_sessions_catalog ON prompt_sessions(catalog_id);
-
--- ── 7. catalog_shares ──────────────────────────────────────
--- Enables controlled cross-user access (viewer/editor)
-CREATE TABLE IF NOT EXISTS catalog_shares (
-  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  catalog_id uuid REFERENCES capability_catalogs(id) ON DELETE CASCADE,
-  user_id    uuid REFERENCES auth.users(id) ON DELETE CASCADE,
-  role       text DEFAULT 'viewer',        -- "viewer" | "editor" | "owner"
-  created_at timestamptz DEFAULT now(),
-  UNIQUE(catalog_id, user_id)
+CREATE TABLE public.catalog_shares (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  catalog_id uuid,
+  user_id uuid,
+  role text DEFAULT 'viewer'::text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT catalog_shares_pkey PRIMARY KEY (id),
+  CONSTRAINT catalog_shares_catalog_id_fkey FOREIGN KEY (catalog_id) REFERENCES public.capability_catalogs(id),
+  CONSTRAINT catalog_shares_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );
-
--- ── RLS POLICIES ───────────────────────────────────────────
-ALTER TABLE capability_catalogs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE capabilities        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE visual_maps         ENABLE ROW LEVEL SECURITY;
-ALTER TABLE diff_history        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE prompt_sessions     ENABLE ROW LEVEL SECURITY;
--- capability_chunks: NO RLS — shared knowledge base, filtered by industry
-
--- capability_catalogs: owner or shared
-CREATE POLICY "access_catalogs" ON capability_catalogs
-  FOR ALL USING (
-    user_id = auth.uid() OR
-    id IN (SELECT catalog_id FROM catalog_shares WHERE user_id = auth.uid())
-  );
-
--- capabilities: scoped via catalog ownership
-CREATE POLICY "access_capabilities" ON capabilities
-  FOR ALL USING (
-    catalog_id IN (
-      SELECT id FROM capability_catalogs
-      WHERE user_id = auth.uid()
-      OR id IN (SELECT catalog_id FROM catalog_shares WHERE user_id = auth.uid())
-    )
-  );
-
--- visual_maps: same scoping as capabilities
-CREATE POLICY "access_visual_maps" ON visual_maps
-  FOR ALL USING (
-    catalog_id IN (
-      SELECT id FROM capability_catalogs
-      WHERE user_id = auth.uid()
-      OR id IN (SELECT catalog_id FROM catalog_shares WHERE user_id = auth.uid())
-    )
-  );
-
--- diff_history: owner only (no shared access to audit logs)
-CREATE POLICY "access_diff_history" ON diff_history
-  FOR ALL USING (
-    catalog_id IN (
-      SELECT id FROM capability_catalogs WHERE user_id = auth.uid()
-    )
-  );
-
--- prompt_sessions: user sees only their own
-CREATE POLICY "access_prompt_sessions" ON prompt_sessions
-  FOR ALL USING (user_id = auth.uid());
+CREATE TABLE public.ai_usage_log (
+  id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
+  timestamp timestamp with time zone NOT NULL DEFAULT now(),
+  model text NOT NULL,
+  mode text NOT NULL,
+  prompt_tokens integer NOT NULL,
+  completion_tokens integer NOT NULL,
+  total_tokens integer NOT NULL,
+  cost_usd numeric NOT NULL,
+  CONSTRAINT ai_usage_log_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.clients (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  industry text,
+  description text,
+  logo_url text,
+  created_by uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT clients_pkey PRIMARY KEY (id),
+  CONSTRAINT clients_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id)
+);
+CREATE TABLE public.client_members (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  client_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  role text NOT NULL DEFAULT 'viewer'::text CHECK (role = ANY (ARRAY['admin'::text, 'editor'::text, 'viewer'::text])),
+  invited_by uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT client_members_pkey PRIMARY KEY (id),
+  CONSTRAINT client_members_client_id_fkey FOREIGN KEY (client_id) REFERENCES public.clients(id),
+  CONSTRAINT client_members_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT client_members_invited_by_fkey FOREIGN KEY (invited_by) REFERENCES auth.users(id)
+);
+CREATE TABLE public.meeting_transcripts (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid,
+  catalog_id uuid,
+  mode text NOT NULL CHECK (mode = ANY (ARRAY['new_diagram'::text, 'edit_diagram'::text])),
+  title text,
+  meeting_date date,
+  raw_text text NOT NULL,
+  cleaned_text text,
+  context_prompt text,
+  template_id uuid,
+  summary text,
+  status text NOT NULL DEFAULT 'uploaded'::text,
+  progress integer NOT NULL DEFAULT 0 CHECK (progress >= 0 AND progress <= 100),
+  current_step text,
+  error_message text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  completed_at timestamp with time zone,
+  CONSTRAINT meeting_transcripts_pkey PRIMARY KEY (id),
+  CONSTRAINT meeting_transcripts_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT meeting_transcripts_catalog_id_fkey FOREIGN KEY (catalog_id) REFERENCES public.capability_catalogs(id),
+  CONSTRAINT meeting_transcripts_template_id_fkey FOREIGN KEY (template_id) REFERENCES public.capability_catalogs(id)
+);
+CREATE TABLE public.transcript_proposals (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  transcript_id uuid NOT NULL,
+  kind text NOT NULL CHECK (kind = ANY (ARRAY['node'::text, 'command'::text, 'todo'::text])),
+  payload jsonb NOT NULL,
+  confidence numeric NOT NULL DEFAULT 0.50 CHECK (confidence >= 0::numeric AND confidence <= 1::numeric),
+  source_quote text,
+  selected boolean NOT NULL DEFAULT true,
+  status text NOT NULL DEFAULT 'pending'::text CHECK (status = ANY (ARRAY['pending'::text, 'accepted'::text, 'declined'::text, 'applied'::text, 'failed'::text])),
+  apply_error text,
+  sort_order integer NOT NULL DEFAULT 0,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT transcript_proposals_pkey PRIMARY KEY (id),
+  CONSTRAINT transcript_proposals_transcript_id_fkey FOREIGN KEY (transcript_id) REFERENCES public.meeting_transcripts(id)
+);

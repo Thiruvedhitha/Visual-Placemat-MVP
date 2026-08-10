@@ -1,15 +1,25 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 
+const isDev = process.env.NODE_ENV === "development";
+
 export default function LoginPage() {
+  const router = useRouter();
   // Hide the global navbar on this page
   useEffect(() => {
     const nav = document.querySelector("nav");
     if (nav) nav.style.display = "none";
     return () => { if (nav) nav.style.display = ""; };
   }, []);
+
+  // Dev-only email + password state
+  const [devEmail, setDevEmail] = useState("");
+  const [devPassword, setDevPassword] = useState("");
+  const [devError, setDevError] = useState<string | null>(null);
+  const [devLoading, setDevLoading] = useState(false);
 
   const handleSignIn = async () => {
     const supabase = createBrowserClient(
@@ -24,6 +34,24 @@ export default function LoginPage() {
         redirectTo: `${window.location.origin}/api/auth/callback`,
       },
     });
+  };
+
+  const handleDevSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDevError(null);
+    setDevLoading(true);
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+    const { error } = await supabase.auth.signInWithPassword({
+      email: devEmail,
+      password: devPassword,
+    });
+    setDevLoading(false);
+    if (error) { setDevError(error.message); return; }
+    router.push("/");
+    router.refresh();
   };
 
   return (
@@ -77,6 +105,37 @@ export default function LoginPage() {
         <p className="mt-8 text-xs text-gray-400 text-center">
           Secure authentication powered by Microsoft Azure AD
         </p>
+
+        {/* Dev-only email + password form — never shown in production */}
+        {isDev && (
+          <form onSubmit={handleDevSignIn} className="mt-6 w-full border-t border-dashed border-gray-300 pt-6 space-y-3">
+            <p className="text-xs font-semibold text-orange-500 text-center">⚠ Dev login — localhost only</p>
+            <input
+              type="email"
+              required
+              placeholder="test@example.com"
+              value={devEmail}
+              onChange={(e) => setDevEmail(e.target.value)}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+            />
+            <input
+              type="password"
+              required
+              placeholder="Password"
+              value={devPassword}
+              onChange={(e) => setDevPassword(e.target.value)}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+            />
+            {devError && <p className="text-xs text-red-500">{devError}</p>}
+            <button
+              type="submit"
+              disabled={devLoading}
+              className="w-full rounded-md bg-orange-500 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-60"
+            >
+              {devLoading ? "Signing in…" : "Sign in (dev)"}
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );

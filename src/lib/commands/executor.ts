@@ -13,6 +13,47 @@ export interface ExecutionResult {
   errors: string[];
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function normalizeCommandNodeIds(
+  commands: DiagramCommand[],
+  capabilities: Capability[]
+): DiagramCommand[] {
+  const usedIds = new Set(capabilities.map((capability) => capability.id));
+  const idMap = new Map<string, string>();
+
+  for (const command of commands) {
+    if (command.type !== "ADD_NODE") continue;
+    const requestedId = command.tempId;
+    if (!UUID_PATTERN.test(requestedId) || usedIds.has(requestedId)) {
+      let generatedId = crypto.randomUUID();
+      while (usedIds.has(generatedId)) generatedId = crypto.randomUUID();
+      if (!idMap.has(requestedId)) idMap.set(requestedId, generatedId);
+      usedIds.add(generatedId);
+    } else {
+      usedIds.add(requestedId);
+    }
+  }
+
+  if (idMap.size === 0) return commands;
+
+  const remap = (id: string | null | undefined) => id ? (idMap.get(id) ?? id) : id;
+  return commands.map((command) => {
+    const normalized = { ...command } as DiagramCommand;
+    if (normalized.type === "ADD_NODE") {
+      normalized.tempId = remap(normalized.tempId)!;
+      normalized.parentId = remap(normalized.parentId) ?? null;
+      normalized.insertAfterId = remap(normalized.insertAfterId);
+    } else if ("nodeId" in normalized) {
+      normalized.nodeId = remap(normalized.nodeId)!;
+      if (normalized.type === "REPARENT_NODE") {
+        normalized.newParentId = remap(normalized.newParentId)!;
+      }
+    }
+    return normalized;
+  });
+}
+
 /**
  * Applies an array of DiagramCommands to the current capability tree and
  * returns the updated tree + node style patches.
@@ -26,6 +67,7 @@ export function executeCommands(
   capabilities: Capability[],
   existingPatches: Record<string, NodeStylePatch> = {}
 ): ExecutionResult {
+  commands = normalizeCommandNodeIds(commands, capabilities);
   let current = [...capabilities];
   const nodePatches: Record<string, NodeStylePatch> = { ...existingPatches };
   const messages: string[] = [];

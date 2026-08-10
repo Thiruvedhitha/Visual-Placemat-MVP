@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Visual Placemat — LLM Communication Flow</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; }
+
+  /* ── Nav ── */
+  nav {
+    position: sticky; top: 0; z-index: 100;
+    background: #1a1d27; border-bottom: 1px solid #2d3748;
+    display: flex; gap: 4px; padding: 10px 20px; flex-wrap: wrap;
+  }
+  nav button {
+    padding: 6px 14px; border-radius: 6px; border: 1px solid #374151;
+    background: transparent; color: #94a3b8; cursor: pointer; font-size: 13px; transition: all .15s;
+  }
+  nav button:hover { background: #1e293b; color: #e2e8f0; }
+  nav button.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+
+  /* ── Layout ── */
+  main { max-width: 1400px; margin: 0 auto; padding: 24px 20px; }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; color: #f1f5f9; }
+  .subtitle { font-size: 13px; color: #64748b; margin-bottom: 28px; }
+
+  /* ── Section ── */
+  .section { display: none; }
+  .section.active { display: block; }
+
+  /* ── Flow container ── */
+  .flow { display: flex; flex-direction: column; gap: 0; }
+
+  /* ── Row ── */
+  .row {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    gap: 0 16px;
+    margin-bottom: 0;
+  }
+
+  /* ── Layer label ── */
+  .layer {
+    padding: 14px 12px 0 0;
+    font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: #475569; text-align: right; border-right: 2px solid #1e293b;
+    position: relative;
+  }
+
+  /* ── Card ── */
+  .card {
+    margin: 6px 0; padding: 14px 16px;
+    border-radius: 10px; border: 1px solid;
+    position: relative;
+  }
+  .card .title { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+  .card .body  { font-size: 12px; color: #94a3b8; line-height: 1.6; }
+  .card .badge {
+    display: inline-block; font-size: 10px; font-weight: 700;
+    padding: 2px 7px; border-radius: 4px; margin-right: 6px; vertical-align: middle;
+  }
+  .card .tag {
+    display: inline-block; font-size: 10px; font-weight: 600;
+    padding: 1px 6px; border-radius: 3px; border: 1px solid; margin: 2px 3px 2px 0;
+  }
+
+  /* colour families */
+  .c-user   { background:#0f2d3d; border-color:#0ea5e9; }
+  .c-user   .title { color:#38bdf8; }
+  .c-fe     { background:#1a1f35; border-color:#6366f1; }
+  .c-fe     .title { color:#a5b4fc; }
+  .c-api    { background:#1a2a1a; border-color:#22c55e; }
+  .c-api    .title { color:#86efac; }
+  .c-llm    { background:#2a1a35; border-color:#a855f7; }
+  .c-llm    .title { color:#d8b4fe; }
+  .c-db     { background:#2a1f0f; border-color:#f59e0b; }
+  .c-db     .title { color:#fcd34d; }
+  .c-react  { background:#1f1a2a; border-color:#ec4899; }
+  .c-react  .title { color:#f9a8d4; }
+  .c-sse    { background:#0f2a1f; border-color:#14b8a6; }
+  .c-sse    .title { color:#5eead4; }
+  .c-info   { background:#1a1a2a; border-color:#334155; color: #64748b; }
+
+  .badge-get    { background:#1e3a3a; color:#34d399; }
+  .badge-post   { background:#1e2a3a; color:#60a5fa; }
+  .badge-patch  { background:#2a2a1e; color:#fbbf24; }
+  .badge-sse    { background:#1e3a2a; color:#34d399; }
+  .badge-db     { background:#2a1e1e; color:#f87171; }
+  .badge-write  { background:#2a1e2a; color:#c084fc; }
+
+  /* ── Arrow connector ── */
+  .arrow {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 0 4px 196px;
+    font-size: 11px; color: #334155;
+  }
+  .arrow::before { content: '▼'; font-size: 14px; color: #334155; }
+
+  /* ── Code block ── */
+  pre {
+    background: #0d1117; border: 1px solid #1e293b; border-radius: 6px;
+    padding: 10px 12px; font-size: 11px; line-height: 1.55; color: #e2e8f0;
+    overflow-x: auto; margin-top: 8px; white-space: pre-wrap; word-break: break-all;
+  }
+  pre .k { color: #7dd3fc; }  /* keyword / key */
+  pre .s { color: #86efac; }  /* string */
+  pre .n { color: #fcd34d; }  /* number */
+  pre .c { color: #64748b; }  /* comment */
+  pre .t { color: #f9a8d4; }  /* type */
+
+  /* ── Collapsible ── */
+  details { margin-top: 8px; }
+  summary { cursor: pointer; font-size: 11px; color: #60a5fa; user-select: none; }
+  summary:hover { color: #93c5fd; }
+
+  /* ── Divider ── */
+  hr { border: none; border-top: 1px solid #1e293b; margin: 20px 0; }
+
+  /* ── Mode tabs inside section ── */
+  .mode-tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+  .mode-tab {
+    padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: 600;
+    border: 1px solid #2d3748; cursor: pointer; transition: all .15s;
+    background: transparent; color: #64748b;
+  }
+  .mode-tab:hover { color: #e2e8f0; border-color: #475569; }
+  .mode-tab.on { background: #1e293b; color: #e2e8f0; border-color: #475569; }
+  .mode-section { display: none; }
+  .mode-section.on { display: block; }
+
+  /* ── Inline highlight ── */
+  .hl { color: #fcd34d; font-weight: 600; }
+  .hl-p { color: #d8b4fe; font-weight: 600; }
+  .hl-g { color: #86efac; font-weight: 600; }
+
+  /* ── Token budget table ── */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+  th { background: #1e293b; color: #94a3b8; text-align: left; padding: 6px 10px; font-size: 11px; }
+  td { padding: 6px 10px; border-bottom: 1px solid #1e293b; color: #cbd5e1; }
+  tr:hover td { background: #1a2133; }
+
+  /* ── Responsive ── */
+  @media (max-width: 700px) {
+    .row { grid-template-columns: 1fr; }
+    .layer { border-right: none; border-bottom: 2px solid #1e293b; text-align: left; padding: 8px 0 4px; }
+    .arrow { padding-left: 0; }
+  }
+</style>
+</head>
+<body>
+
+<nav id="mainNav">
+  <button class="active" onclick="showSection('s1', this)">① Blank AI Start</button>
+  <button onclick="showSection('s2', this)">② AI Editor Chat</button>
+  <button onclick="showSection('s3', this)">③ Transcript (No Template)</button>
+  <button onclick="showSection('s4', this)">④ Transcript (With Template)</button>
+  <button onclick="showSection('s5', this)">⑤ ReactFlow Execution</button>
+</nav>
+
+<main>
+  <h1>Visual Placemat — LLM Communication Flow</h1>
+  <p class="subtitle">Actual data flow for every AI interaction path: what is sent, what the LLM returns, and what happens to it in the system.</p>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!--  SECTION 1 — BLANK AI START                                          -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <div id="s1" class="section active">
+    <h2 style="color:#38bdf8;margin-bottom:16px">① Start with Blank AI — what gets sent to the LLM</h2>
+    <p style="font-size:13px;color:#64748b;margin-bottom:20px">
+      User clicks <strong style="color:#e2e8f0">"Start with AI Prompt"</strong> on the homepage → a blank canvas loads with the AI editor open.
+      <strong style="color:#fcd34d">capabilities = []</strong>, no nodes exist yet.
+    </p>
+
+    <div class="flow">
+
+      <!-- STEP 1 -->
+      <div class="row">
+        <div class="layer">User</div>
+        <div class="card c-user">
+          <div class="title">User types the first prompt</div>
+          <div class="body">
+            Example: <em style="color:#e2e8f0">"Create a capability map for a retail bank with L0 as the bank name, three L1 divisions, and two L2 capabilities each"</em>
+            <br/><br/>
+            <span class="tag" style="border-color:#38bdf8;color:#38bdf8">EntryCards.tsx</span>
+            <span class="tag" style="border-color:#38bdf8;color:#38bdf8">AIMapEditor.tsx</span>
+            &nbsp;Mode auto-detected as <span class="hl">command</span> (no "suggest"/"list" keywords).
+          </div>
+        </div>
+      </div>
+      <div class="arrow">AIMapEditor sendMessage() called</div>
+
+      <!-- STEP 2 -->
+      <div class="row">
+        <div class="layer">Front-end</div>
+        <div class="card c-fe">
+          <div class="title">AIMapEditor.tsx — builds the request body</div>
+          <div class="body">
+            <span class="tag" style="border-color:#6366f1;color:#a5b4fc">sendMessage()</span>
+            Reads live state from <code>useCatalogStore.getState()</code> at call-time so renamed/added nodes are always fresh.
+            <pre><code><span class="k">POST</span> /api/transform
+{
+  <span class="k">"prompt"</span>:       <span class="s">"Create a capability map for a retail bank..."</span>,
+  <span class="k">"capabilities"</span>: <span class="t">[]</span>,          <span class="c">// ← EMPTY — blank canvas</span>
+  <span class="k">"nodeStyles"</span>:   <span class="t">{}</span>,          <span class="c">// no style overrides</span>
+  <span class="k">"history"</span>:      <span class="t">[]</span>,          <span class="c">// first message — no prior turns</span>
+  <span class="k">"mode"</span>:         <span class="s">"command"</span>,   <span class="c">// direct apply (not suggest)</span>
+  <span class="k">"legend"</span>:       <span class="t">null</span>         <span class="c">// no legend yet</span>
+}</code></pre>
+            Before sending, <code>saveMessagesToDB()</code> persists the user message to Supabase <span class="hl-p">chat history</span>.
+          </div>
+        </div>
+      </div>
+      <div class="arrow">DB write: chat_history user message → capability_catalogs.chat_history (JSONB)</div>
+
+      <!-- STEP 3 -->
+      <div class="row">
+        <div class="layer">API Route</div>
+        <div class="card c-api">
+          <div class="title"><span class="badge badge-post">POST</span> /api/transform — route.ts</div>
+          <div class="body">
+            <strong>trimCapabilities()</strong> — with an empty array, there's nothing to trim, returns <code>[]</code>.<br/><br/>
+            Since <code>mode = "command"</code>, calls <span class="hl-p">buildCommandPrompt([], {}, [], undefined)</span>
+          </div>
+        </div>
+      </div>
+      <div class="arrow">buildCommandPrompt() constructs system prompt</div>
+
+      <!-- STEP 4 -->
+      <div class="row">
+        <div class="layer">Prompt Builder</div>
+        <div class="card c-llm">
+          <div class="title">System Prompt sent to OpenAI — blank canvas variant</div>
+          <div class="body">
+            <details>
+              <summary>▶ Click to see full system prompt sent to gpt-4.1-mini</summary>
+              <pre><code><span class="c">── SYSTEM MESSAGE ───────────────────────────────────────────</span>
+<span class="t">You are an AI assistant for editing a capability map diagram.</span>
+
+## Available Commands
+Reply with ONLY a JSON object in this exact shape:
+{
+  <span class="k">"commands"</span>: [ ...command objects... ],
+  <span class="k">"summary"</span>: <span class="s">"one sentence describing what you did"</span>
+}
+
+### Command types
+1. SET_STYLE   { type, nodeId, fill?, border? }
+2. SET_NOTE    { type, nodeId, note }
+3. SET_DESCRIPTION { type, nodeId, description }
+4. SET_TEXT_COLOR  { type, nodeId, color }
+5. RENAME_NODE { type, nodeId, newName }
+6. REPARENT_NODE { type, nodeId, newParentId }
+7. DELETE_NODE { type, nodeId, reparentChildren? }
+8. ADD_NODE    { type, tempId (uuid), parentId, level(0-3), name, description?, insertAfterId? }
+9. RESET_STYLE { type, nodeId, fill?, border?, textColor? }
+10. SET_LEGEND  { type, slot, entryId, label, color }
+11. REMOVE_LEGEND { type, slot, entryId }
+
+[...rules about hex colours, not inventing IDs, level hierarchy...]
+
+## Current Diagram
+<span class="c">← EMPTY (no nodes exist yet)</span>
+
+<span class="c">── USER MESSAGE ─────────────────────────────────────────────</span>
+<span class="s">"Create a capability map for a retail bank with L0 as the bank name,
+ three L1 divisions, and two L2 capabilities each"</span></code></pre>
+            </details>
+            <br/>
+            <strong>Token budget (blank canvas):</strong>
+            <table>
+              <tr><th>Part</th><th>~Tokens</th></tr>
+              <tr><td>System prompt (static rules)</td><td>~900</td></tr>
+              <tr><td>Current Diagram tree</td><td><span class="hl-g">0</span> (empty)</td></tr>
+              <tr><td>User message</td><td>~30</td></tr>
+              <tr><td><strong>Total input</strong></td><td><strong>~930</strong></td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="arrow">OpenAI API call: gpt-4.1-mini, max_tokens=8192, response_format=json_object, temp=default</div>
+
+      <!-- STEP 5 -->
+      <div class="row">
+        <div class="layer">LLM Response</div>
+        <div class="card c-llm">
+          <div class="title">LLM returns structured JSON</div>
+          <div class="body">
+            <pre><code>{
+  <span class="k">"commands"</span>: [
+    { <span class="k">"type"</span>: <span class="s">"ADD_NODE"</span>, <span class="k">"tempId"</span>: <span class="s">"uuid-L0-1"</span>, <span class="k">"parentId"</span>: <span class="t">null</span>, <span class="k">"level"</span>: <span class="n">0</span>,
+      <span class="k">"name"</span>: <span class="s">"Retail Bank"</span> },
+    { <span class="k">"type"</span>: <span class="s">"ADD_NODE"</span>, <span class="k">"tempId"</span>: <span class="s">"uuid-L1-1"</span>, <span class="k">"parentId"</span>: <span class="s">"uuid-L0-1"</span>, <span class="k">"level"</span>: <span class="n">1</span>,
+      <span class="k">"name"</span>: <span class="s">"Retail Banking"</span> },
+    { <span class="k">"type"</span>: <span class="s">"ADD_NODE"</span>, <span class="k">"tempId"</span>: <span class="s">"uuid-L1-2"</span>, <span class="k">"parentId"</span>: <span class="s">"uuid-L0-1"</span>, <span class="k">"level"</span>: <span class="n">1</span>,
+      <span class="k">"name"</span>: <span class="s">"Corporate Banking"</span> },
+    { <span class="k">"type"</span>: <span class="s">"ADD_NODE"</span>, <span class="k">"tempId"</span>: <span class="s">"uuid-L1-3"</span>, <span class="k">"parentId"</span>: <span class="s">"uuid-L0-1"</span>, <span class="k">"level"</span>: <span class="n">1</span>,
+      <span class="k">"name"</span>: <span class="s">"Digital Banking"</span> },
+    { <span class="k">"type"</span>: <span class="s">"ADD_NODE"</span>, <span class="k">"tempId"</span>: <span class="s">"uuid-L2-1"</span>, <span class="k">"parentId"</span>: <span class="s">"uuid-L1-1"</span>, <span class="k">"level"</span>: <span class="n">2</span>,
+      <span class="k">"name"</span>: <span class="s">"Account Management"</span> },
+    <span class="c">// ... more L2 nodes ...</span>
+  ],
+  <span class="k">"summary"</span>: <span class="s">"Created a retail bank capability map with 1 L0, 3 L1, and 6 L2 nodes."</span>
+}</code></pre>
+          </div>
+        </div>
+      </div>
+      <div class="arrow">Response parsed → usage logged to ai_usage_log table</div>
+
+      <!-- STEP 6 DB -->
+      <div class="row">
+        <div class="layer">DB Write</div>
+        <div class="card c-db">
+          <div class="title"><span class="badge badge-db">DB</span> ai_usage_log — usage entry written</div>
+          <div class="body">
+            <pre><code>{ timestamp, model: <span class="s">"gpt-4.1-mini"</span>, mode: <span class="s">"command"</span>,
+  prompt_tokens, completion_tokens, total_tokens,
+  cost_usd <span class="c">// gpt-4.1-mini: $0.40/1M input, $1.60/1M output</span> }</code></pre>
+          </div>
+        </div>
+      </div>
+      <div class="arrow">commands[] returned to AIMapEditor → onAICommands() fires</div>
+
+      <!-- STEP 7 ReactFlow -->
+      <div class="row">
+        <div class="layer">ReactFlow</div>
+        <div class="card c-react">
+          <div class="title">executeCommands() — nodes appear on the canvas</div>
+          <div class="body">
+            Each <code>ADD_NODE</code> command is processed in order. <code>tempId</code> UUIDs from the LLM are used to wire parent-child relationships during this batch.
+            After all commands run, the Zustand store is marked <span class="hl">dirty</span> and the <strong>"Apply"</strong> button lights up.
+            <br/><br/>
+            <span style="color:#fcd34d">No DB write yet</span> — changes are local until the user clicks "Apply".
+          </div>
+        </div>
+      </div>
+      <div class="arrow">User clicks "Apply" header button</div>
+
+      <!-- STEP 8 Save -->
+      <div class="row">
+        <div class="layer">DB Save</div>
+        <div class="card c-db">
+          <div class="title"><span class="badge badge-post">POST</span> /api/catalogs/save — persists the new diagram</div>
+          <div class="body">
+            Supabase bulk upsert: creates <code>capability_catalogs</code> row + all <code>capabilities</code> rows.
+            Returns <code>catalogId</code> which is set in the store.
+            AI chat history (user message + AI summary) is also persisted here.
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /flow -->
+  </div><!-- /s1 -->
+
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!--  SECTION 2 — AI EDITOR CHAT                                          -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <div id="s2" class="section">
+    <h2 style="color:#a5b4fc;margin-bottom:16px">② AI Editor — all communication modes</h2>
+    <p style="font-size:13px;color:#64748b;margin-bottom:16px">
+      The AI Editor (<code>AIMapEditor.tsx</code>) auto-detects the mode from the user's text.
+      Each mode sends a different system prompt and gets a different JSON shape back.
+    </p>
+
+    <div class="mode-tabs">
+      <button class="mode-tab on" onclick="showMode('m-cmd', this)">command (default)</button>
+      <button class="mode-tab" onclick="showMode('m-sug', this)">suggest</button>
+      <button class="mode-tab" onclick="showMode('m-chat', this)">chat / info</button>
+      <button class="mode-tab" onclick="showMode('m-scope', this)">node-scope</button>
+    </div>
+
+    <!-- COMMAND MODE -->
+    <div id="m-cmd" class="mode-section on">
+      <div class="flow">
+        <div class="row">
+          <div class="layer">Detect</div>
+          <div class="card c-fe">
+            <div class="title">Mode = "command" — direct apply</div>
+            <div class="body">
+              Triggered when: no <em>suggest/recommend/idea/review</em> keywords AND no <em>list/show/what are/how many</em> keywords.
+              <br/>Example: <em style="color:#e2e8f0">"Rename 'Finance' to 'Financial Services'"</em>
+            </div>
+          </div>
+        </div>
+        <div class="arrow">POST /api/transform with mode="command"</div>
+        <div class="row">
+          <div class="layer">System prompt</div>
+          <div class="card c-llm">
+            <div class="title">buildCommandPrompt() — with live diagram tree</div>
+            <div class="body">
+              <pre><code><span class="c">── SYSTEM ─────────────────────────────────</span>
+You are an AI assistant for editing a capability map diagram.
+Reply with ONLY a JSON object: { "commands": [...], "summary": "..." }
+
+[...11 command types listed with shapes...]
+[...rules: hex colours, never invent IDs, level hierarchy...]
+
+## Current Legend
+Fill:   [{ id: "atlassian-tool", label: "Atlassian tool", color: "#3b82f6" }]
+Border: []
+
+## Current Diagram
+<span class="n">1</span>. Retail Bank  [id: uuid-L0-1]  <span class="c">← L0</span>
+  <span class="n">1.1</span> Retail Banking  [id: uuid-L1-1]
+    <span class="n">1.1.1</span> Account Management  [id: uuid-L2-1]  desc:"Manages..."
+    <span class="n">1.1.2</span> Lending  [id: uuid-L2-2]
+  <span class="n">1.2</span> Corporate Banking  [id: uuid-L1-2]
+  <span class="n">1.3</span> Digital Banking  [id: uuid-L1-3]
+<span class="c">← Tree rendered by renderTree() with real UUIDs</span>
+
+<span class="c">── HISTORY (last 20 turns) ────────────────</span>
+{ role: "user",      content: "Add a node under Retail Banking" }
+{ role: "assistant", content: "Added 'Savings Accounts'..." }
+
+<span class="c">── USER ───────────────────────────────────</span>
+"Rename 'Finance' to 'Financial Services'"</code></pre>
+            </div>
+          </div>
+        </div>
+        <div class="arrow">OpenAI gpt-4.1-mini → { commands[], summary }</div>
+        <div class="row">
+          <div class="layer">Response</div>
+          <div class="card c-llm">
+            <div class="title">LLM output — command mode</div>
+            <div class="body">
+              <pre><code>{
+  <span class="k">"commands"</span>: [
+    { <span class="k">"type"</span>: <span class="s">"RENAME_NODE"</span>, <span class="k">"nodeId"</span>: <span class="s">"&lt;existing-uuid&gt;"</span>, <span class="k">"newName"</span>: <span class="s">"Financial Services"</span> }
+  ],
+  <span class="k">"summary"</span>: <span class="s">"Renamed 'Finance' to 'Financial Services'."</span>
+}</code></pre>
+              Commands go directly to <code>onAICommands()</code> → <code>executeCommands()</code> → canvas updates immediately.
+              No user review step.
+            </div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="layer">DB writes</div>
+          <div class="card c-db">
+            <div class="title">What gets written to DB immediately</div>
+            <div class="body">
+              <span class="badge badge-write">WRITE</span> <code>capability_catalogs.chat_history</code> (JSONB) — user message appended via <code>saveMessagesToDB()</code><br/>
+              <span class="badge badge-write">WRITE</span> Same field — AI summary appended<br/>
+              <span class="badge badge-write">WRITE</span> <code>ai_usage_log</code> — token counts + cost<br/>
+              <span class="badge badge-db">DEFERRED</span> Canvas node changes are <strong>local only</strong> until user clicks "Apply" → <code>POST /api/catalogs/save</code>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SUGGEST MODE -->
+    <div id="m-sug" class="mode-section">
+      <div class="flow">
+        <div class="row">
+          <div class="layer">Detect</div>
+          <div class="card c-fe">
+            <div class="title">Mode = "suggest" — user reviews proposals</div>
+            <div class="body">
+              Triggered by keywords: <em>suggest, recommend, idea, proposal, review, advise, improve, maybe, consider, how about, what if, should I</em>.<br/>
+              Also triggered by Quick Action buttons (Rename node, Recolour, Suggest structure).<br/>
+              All capabilities sent (no trimming) so the AI can reference any node.
+            </div>
+          </div>
+        </div>
+        <div class="arrow">POST /api/transform with mode="suggest"</div>
+        <div class="row">
+          <div class="layer">System prompt</div>
+          <div class="card c-llm">
+            <div class="title">buildSuggestionPrompt() — proposals shape</div>
+            <div class="body">
+              <pre><code><span class="c">── SYSTEM ─────────────────────────────────</span>
+You are an AI assistant reviewing a capability map diagram.
+The user wants suggestions — do NOT apply changes directly.
+Return a list of proposals the user can review and selectively accept or decline.
+
+## Response Format
+{
+  <span class="k">"proposals"</span>: [
+    { <span class="k">"id"</span>: <span class="s">"p1"</span>, <span class="k">"description"</span>: <span class="s">"Rename L2 'Ops' to 'Operations Mgmt'"</span>,
+      <span class="k">"command"</span>: { ...single command object... } }
+  ],
+  <span class="k">"summary"</span>: <span class="s">"3 naming suggestions for clearer node labels"</span>
+}
+
+Rules:
+- Max 10 proposals
+- description: ONE sentence ≤12 words, include level prefix
+- summary: ONE sentence ≤12 words
+
+## Current Diagram
+[full tree — no trimming]</code></pre>
+            </div>
+          </div>
+        </div>
+        <div class="arrow">OpenAI → { proposals[], summary }</div>
+        <div class="row">
+          <div class="layer">UI</div>
+          <div class="card c-react">
+            <div class="title">Proposal cards rendered in chat — Accept / Decline per item</div>
+            <div class="body">
+              Each proposal has state: <code>pending → accepted | declined</code>.<br/>
+              <strong>Accept:</strong> fires <code>onAICommands([proposal.command])</code> → <code>executeCommands()</code> → immediate canvas update.<br/>
+              <strong>Decline:</strong> state = "declined", no canvas change.<br/><br/>
+              Accepted proposals are reflected in next history turn as:
+              <code>[APPLIED] Rename L2 'Ops' to 'Operations Mgmt'</code>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CHAT MODE -->
+    <div id="m-chat" class="mode-section">
+      <div class="flow">
+        <div class="row">
+          <div class="layer">Detect</div>
+          <div class="card c-fe">
+            <div class="title">Mode = "chat" — plain text answer</div>
+            <div class="body">
+              Triggered by: <em>list, show, display, what are, what is, how many, count, tell me, which, describe, overview, summarize, give me, print, enumerate</em>
+              AND no action words (rename/delete/add etc).<br/>
+              Example: <em style="color:#e2e8f0">"How many L2 nodes do I have?"</em>
+            </div>
+          </div>
+        </div>
+        <div class="arrow">POST /api/transform with mode="chat"</div>
+        <div class="row">
+          <div class="layer">System prompt</div>
+          <div class="card c-llm">
+            <div class="title">buildChatPrompt() — plain text, no JSON</div>
+            <div class="body">
+              <pre><code><span class="c">── SYSTEM ─────────────────────────────────</span>
+You are an AI assistant for a capability map diagram.
+Answer the user's question in plain text using the diagram data below.
+
+Rules:
+- Answer concisely. Use bullet points when listing nodes.
+- Do NOT output JSON or commands.
+- Show hierarchical numbers: "1.7: Strategy & OKR Management"
+
+## Current Diagram
+[full tree — no trimming]
+
+<span class="c">── RESPONSE FORMAT ─────────────────────────</span>
+Plain text — no json_object response_format constraint</code></pre>
+            </div>
+          </div>
+        </div>
+        <div class="arrow">OpenAI → plain text string</div>
+        <div class="row">
+          <div class="layer">Response</div>
+          <div class="card c-llm">
+            <div class="title">API returns { reply: "&lt;plain text&gt;" }</div>
+            <div class="body">
+              Displayed as a chat bubble. No commands, no canvas changes.
+              <pre><code><span class="c">// route.ts — chat mode fast-path</span>
+<span class="k">if</span> (mode === <span class="s">"chat"</span>) {
+  <span class="k">return</span> NextResponse.json({ <span class="k">reply</span>: content.trim() });
+}</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- NODE SCOPE -->
+    <div id="m-scope" class="mode-section">
+      <div class="flow">
+        <div class="row">
+          <div class="layer">Scope</div>
+          <div class="card c-fe">
+            <div class="title">Node-scope mode — user right-clicks a node and opens AI</div>
+            <div class="body">
+              When <code>scope = "node"</code> and <code>targetNode</code> is set, <code>buildPrompt()</code> prefixes:
+              <pre><code>[Scope: node "<span class="s">Account Management</span>" id "<span class="s">uuid-L2-1</span>" level <span class="n">2</span>]
+&lt;user message&gt;</code></pre>
+              This prefix is stripped by <code>trimCapabilities()</code> (regex) so only the real request
+              drives keyword matching — the selected node is force-included regardless.
+            </div>
+          </div>
+        </div>
+        <div class="arrow">Same POST /api/transform — prefix is visible to LLM in the user message</div>
+        <div class="row">
+          <div class="layer">Effect</div>
+          <div class="card c-api">
+            <div class="title">trimCapabilities() — canvasSelectedId force-include</div>
+            <div class="body">
+              The UUID in the prefix is extracted and the node + its siblings are always included in the trimmed set,
+              even if their names don't match the keyword filter.
+              This ensures the LLM sees the target node in the tree with its real ID.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /s2 -->
+
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!--  SECTION 3 — TRANSCRIPT NO TEMPLATE                                  -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <div id="s3" class="section">
+    <h2 style="color:#5eead4;margin-bottom:16px">③ Transcript Import — No Template (new_diagram mode)</h2>
+    <p style="font-size:13px;color:#64748b;margin-bottom:20px">
+      User uploads a meeting transcript from the homepage. Mode = <span class="hl">new_diagram</span>, no template selected.
+      Three sequential LLM calls. No existing capability tree.
+    </p>
+
+    <div class="flow">
+
+      <div class="row">
+        <div class="layer">Upload</div>
+        <div class="card c-user">
+          <div class="title">User uploads .txt / .docx / .vtt or pastes text</div>
+          <div class="body">
+            TranscriptUpload.tsx collects: file, mode=<span class="hl">new_diagram</span>, optional title, meeting date, context prompt (freeform user notes about the meeting).
+            <br/>No <code>templateId</code>, no <code>catalogId</code>.
+          </div>
+        </div>
+      </div>
+      <div class="arrow">POST /api/transcripts — creates DB row, returns { id }</div>
+
+      <div class="row">
+        <div class="layer">DB</div>
+        <div class="card c-db">
+          <div class="title"><span class="badge badge-post">POST</span> /api/transcripts — DB insert</div>
+          <div class="body">
+            <pre><code><span class="c">INSERT INTO meeting_transcripts:</span>
+{ user_id, mode: <span class="s">"new_diagram"</span>, raw_text, title,
+  meeting_date, context_prompt, template_id: <span class="t">null</span>,
+  catalog_id: <span class="t">null</span>, status: <span class="s">"uploaded"</span>, progress: <span class="n">0</span> }</code></pre>
+            File parsed: .vtt → parseVtt.ts, .docx → parseDocx.ts (mammoth), .txt → passthrough.
+            Returns <code>{ id: "&lt;transcript-uuid&gt;" }</code> immediately.
+          </div>
+        </div>
+      </div>
+      <div class="arrow">Client opens SSE: GET /api/transcripts/:id/stream</div>
+
+      <!-- STAGE 1 -->
+      <div class="row">
+        <div class="layer">Stage 1 · 10%</div>
+        <div class="card c-sse">
+          <div class="title"><span class="badge badge-sse">SSE</span> clean.ts — regex scrub, no LLM</div>
+          <div class="body">
+            Removes timestamps (00:00:00 patterns), speaker labels (Name:), filler words, deduplicates lines.
+            <span class="hl-g">No LLM call.</span> Pure regex. Result stored in <code>cleaned_text</code>.
+            <pre><code>SSE event: { progress: 10, step: <span class="s">"Parsing &amp; cleaning transcript"</span> }</code></pre>
+          </div>
+        </div>
+      </div>
+      <div class="arrow">Progress 10% → 30%</div>
+
+      <!-- PASS 1 -->
+      <div class="row">
+        <div class="layer">Pass 1 · 20→30%</div>
+        <div class="card c-llm">
+          <div class="title">LLM Call #1 — pass1Filter() — noise removal</div>
+          <div class="body">
+            <strong>Model:</strong> gpt-4.1-mini &nbsp;|&nbsp; <strong>Temperature:</strong> 0.1 &nbsp;|&nbsp; <strong>Format:</strong> json_object
+            <pre><code><span class="c">── SYSTEM ─────────────────────────────────────────────</span>
+You filter business meeting transcripts.
+Keep ONLY paragraphs about: business capabilities, processes,
+tools, systems, roles, priorities, decisions, action items.
+Drop: small-talk, scheduling, pleasantries, tech glitches.
+Return JSON: { <span class="k">"keptText"</span>: <span class="s">"&lt;filtered text&gt;"</span> }
+<span class="c">// + contextPrompt if user provided one</span>
+
+<span class="c">── USER ───────────────────────────────────────────────</span>
+&lt;full cleaned transcript text&gt;</code></pre>
+            <strong>Output:</strong> <code>{ "keptText": "&lt;filtered text — 30-70% of original&gt;" }</code>
+          </div>
+        </div>
+      </div>
+      <div class="arrow">Progress 30% → 55%</div>
+
+      <!-- PASS 2 new_diagram -->
+      <div class="row">
+        <div class="layer">Pass 2 · 35→55%</div>
+        <div class="card c-llm">
+          <div class="title">LLM Call #2 — pass2Extract(mode="new_diagram") — build tree from scratch</div>
+          <div class="body">
+            <strong>No existing capability tree sent.</strong> LLM creates the hierarchy from the transcript.
+            <pre><code><span class="c">── SYSTEM ─────────────────────────────────────────────</span>
+You extract a hierarchical business capability map from a meeting transcript.
+Return JSON: { <span class="k">"nodes"</span>: [ ...node objects... ] }
+
+Each node:
+{
+  <span class="k">"tempId"</span>:       <span class="s">"n1"</span>,         <span class="c">// unique within this response</span>
+  <span class="k">"parentTempId"</span>: <span class="t">null</span>,         <span class="c">// null for L0</span>
+  <span class="k">"level"</span>:        <span class="n">0</span>,             <span class="c">// 0=domain, 1=sub-domain, 2=cap, 3=sub-cap</span>
+  <span class="k">"name"</span>:         <span class="s">"Finance"</span>,
+  <span class="k">"description"</span>:  <span class="s">"..."</span>,
+  <span class="k">"confidence"</span>:   <span class="n">0.92</span>,          <span class="c">// 0-1 certainty</span>
+  <span class="k">"sourceQuote"</span>:  <span class="s">"we need to modernise our payments stack"</span>
+}
+<span class="c">// + contextPrompt if provided</span>
+
+<span class="c">── USER ───────────────────────────────────────────────</span>
+&lt;filtered text from Pass 1&gt;</code></pre>
+            <strong>Output:</strong> <code>{ "nodes": [ ...NodeProposalPayload[] ] }</code>
+          </div>
+        </div>
+      </div>
+      <div class="arrow">Progress 55% → 80%</div>
+
+      <!-- PASS 3 -->
+      <div class="row">
+        <div class="layer">Pass 3 · 60→80%</div>
+        <div class="card c-llm">
+          <div class="title">LLM Call #3 — pass3Todos() — action items + summary</div>
+          <div class="body">
+            <pre><code><span class="c">── SYSTEM ─────────────────────────────────────────────</span>
+You extract action items and write a meeting summary.
+
+Context of what was already extracted:
+"Proposed 12 capability nodes"    <span class="c">← pass2Summary injected here</span>
+
+Return JSON:
+{
+  <span class="k">"summary"</span>: <span class="s">"3-5 sentence recap of decisions and outcomes"</span>,
+  <span class="k">"todos"</span>: [{
+    <span class="k">"text"</span>:        <span class="s">"Schedule follow-up on API integration"</span>,
+    <span class="k">"targetName"</span>:  <span class="s">"Digital Channels"</span>,  <span class="c">// or null</span>
+    <span class="k">"priority"</span>:    <span class="s">"high"</span>,
+    <span class="k">"owner"</span>:       <span class="s">"Sarah"</span>,            <span class="c">// or null</span>
+    <span class="k">"sourceQuote"</span>: <span class="s">"Sarah will own the API work..."</span>
+  }]
+}
+<span class="c">// + contextPrompt for ownership/priority hints</span>
+
+<span class="c">── USER ───────────────────────────────────────────────</span>
+&lt;filtered text from Pass 1&gt;</code></pre>
+          </div>
+        </div>
+      </div>
+      <div class="arrow">Progress 80% → 95% — resolve fuzzy names</div>
+
+      <!-- RESOLVE -->
+      <div class="row">
+        <div class="layer">Resolve · 95%</div>
+        <div class="card c-api">
+          <div class="title">resolve.ts — fuzzy name match, no LLM</div>
+          <div class="body">
+            For <code>new_diagram</code> mode (no existing tree), resolve is a no-op — nodes have no existing IDs to match against.
+            For todos: <code>targetName</code> is fuzzy-matched against the proposed node names using Levenshtein distance.
+            <span class="hl-g">No LLM call.</span>
+          </div>
+        </div>
+      </div>
+      <div class="arrow">Progress 100% → status = "ready_for_review"</div>
+
+      <!-- DB Persist -->
+      <div class="row">
+        <div class="layer">DB</div>
+        <div class="card c-db">
+          <div class="title"><span class="badge badge-write">WRITE</span> transcript_proposals rows</div>
+          <div class="body">
+            <pre><code><span class="c">-- One row per node proposal:</span>
+{ transcript_id, kind: <span class="s">"node"</span>, selected: <span class="t">true</span>,
+  payload: { tempId, parentTempId, level, name, description, confidence, sourceQuote } }
+
+<span class="c">-- One row per todo:</span>
+{ transcript_id, kind: <span class="s">"todo"</span>, selected: <span class="t">true</span>,
+  payload: { text, targetName, priority, owner, sourceQuote } }
+
+<span class="c">-- meeting_transcripts updated:</span>
+{ summary, status: <span class="s">"ready_for_review"</span>, progress: <span class="n">100</span> }</code></pre>
+          </div>
+        </div>
+      </div>
+      <div class="arrow">SSE closes → Review modal opens in browser</div>
+
+      <!-- Review -->
+      <div class="row">
+        <div class="layer">Review</div>
+        <div class="card c-user">
+          <div class="title">User toggles checkboxes → clicks "Apply"</div>
+          <div class="body">
+            <span class="badge badge-patch">PATCH</span> <code>/api/transcripts/:id/proposals</code> — updates <code>selected</code> column on each row.<br/><br/>
+            Then: <span class="badge badge-post">POST</span> <code>/api/transcripts/:id/apply</code>
+          </div>
+        </div>
+      </div>
+      <div class="arrow">applyNew.ts — creates capability_catalog + capabilities</div>
+
+      <!-- Apply -->
+      <div class="row">
+        <div class="layer">DB</div>
+        <div class="card c-db">
+          <div class="title"><span class="badge badge-write">WRITE</span> applyNew.ts — new catalog created</div>
+          <div class="body">
+            Accepted <code>node</code> proposals → converted to real <code>capabilities</code> rows (real UUIDs assigned).<br/>
+            Accepted <code>todo</code> proposals with a matched node → <code>SET_NOTE</code> applied.<br/>
+            <pre><code>capability_catalogs: { id, name, user_id, client_id, node_styles:{}, ... }
+capabilities:        { id, catalog_id, parent_id, level, name, description, sort_order }
+meeting_transcripts: { status: <span class="s">"completed"</span>, catalog_id: &lt;new-id&gt; }</code></pre>
+            Redirects to <code>/dashboard?catalogId=&lt;new-id&gt;</code>.
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /flow -->
+  </div><!-- /s3 -->
+
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!--  SECTION 4 — TRANSCRIPT WITH TEMPLATE                                -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <div id="s4" class="section">
+    <h2 style="color:#fcd34d;margin-bottom:16px">④ Transcript Import — With Template</h2>
+    <p style="font-size:13px;color:#64748b;margin-bottom:20px">
+      User selects a built-in template (e.g. "Banking Capabilities") before uploading.
+      Mode = <span class="hl">new_diagram</span> but <code>templateId</code> is set.
+      Pass 2 switches to <span class="hl">edit_diagram</span> extraction — LLM receives the template tree and proposes commands against it instead of building from scratch.
+    </p>
+
+    <div class="flow">
+
+      <div class="row">
+        <div class="layer">Upload</div>
+        <div class="card c-user">
+          <div class="title">User picks template + uploads transcript</div>
+          <div class="body">
+            TemplatePickerModal → user selects e.g. "Banking Capabilities" → <code>templateId</code> stored.<br/>
+            POST body includes: <code>mode: "new_diagram"</code>, <code>templateId: "&lt;uuid&gt;"</code>
+          </div>
+        </div>
+      </div>
+      <div class="arrow">POST /api/transcripts → DB row with template_id set</div>
+
+      <div class="row">
+        <div class="layer">DB</div>
+        <div class="card c-db">
+          <div class="title"><span class="badge badge-post">POST</span> /api/transcripts — with templateId</div>
+          <div class="body">
+            <pre><code>{ user_id, mode: <span class="s">"new_diagram"</span>,
+  template_id: <span class="s">"&lt;builtin-catalog-uuid&gt;"</span>,
+  catalog_id: <span class="t">null</span>,  <span class="c">// ← user's new diagram not yet created</span>
+  raw_text, ... }</code></pre>
+          </div>
+        </div>
+      </div>
+      <div class="arrow">SSE stream starts</div>
+
+      <div class="row">
+        <div class="layer">Stage 1</div>
+        <div class="card c-sse">
+          <div class="title">clean.ts — same as no-template flow</div>
+          <div class="body"><span class="hl-g">No LLM.</span> Regex scrub → cleaned_text.</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="layer">Pass 1</div>
+        <div class="card c-llm">
+          <div class="title">LLM Call #1 — pass1Filter() — identical to no-template</div>
+          <div class="body">Same system prompt. Filters noise. Returns <code>{ keptText }</code>.</div>
+        </div>
+      </div>
+      <div class="arrow">Pipeline loads template capabilities from DB before Pass 2</div>
+
+      <!-- KEY DIFFERENCE -->
+      <div class="row">
+        <div class="layer">DB Read</div>
+        <div class="card c-db">
+          <div class="title"><span class="badge badge-get">GET</span> Template capabilities loaded from Supabase</div>
+          <div class="body">
+            <pre><code>SELECT * FROM capabilities
+WHERE catalog_id = <span class="s">'&lt;template_id&gt;'</span>
+  AND is_deleted = false</code></pre>
+            This gives Pass 2 the full template tree with real UUIDs — so the LLM can generate commands against existing nodes.
+            <pre><code><span class="c">// pipeline.ts — key branch</span>
+<span class="k">const</span> extractMode = (tx.mode === <span class="s">"new_diagram"</span> && tx.template_id && capabilities.length > <span class="n">0</span>)
+  ? <span class="s">"edit_diagram"</span>   <span class="c">// ← switches to edit extraction</span>
+  : tx.mode;</code></pre>
+          </div>
+        </div>
+      </div>
+      <div class="arrow">Pass 2 runs in edit_diagram mode with template tree</div>
+
+      <div class="row">
+        <div class="layer">Pass 2 · KEY DIFF</div>
+        <div class="card c-llm" style="border-color:#fcd34d;">
+          <div class="title" style="color:#fcd34d;">LLM Call #2 — pass2Extract(mode="edit_diagram") — commands against template</div>
+          <div class="body">
+            <strong>DIFFERENT from no-template!</strong> System prompt now includes the template tree + available command types.
+            <pre><code><span class="c">── SYSTEM ─────────────────────────────────────────────</span>
+You propose diagram commands based on a meeting transcript and the existing capability tree.
+Available command types:
+  SET_STYLE, SET_NOTE, SET_DESCRIPTION, SET_TEXT_COLOR,
+  RENAME_NODE, REPARENT_NODE, DELETE_NODE, ADD_NODE,
+  RESET_STYLE, SET_LEGEND, REMOVE_LEGEND
+
+IMPORTANT: When referencing existing nodes use the exact "id" UUID from the tree below.
+
+Return JSON: { <span class="k">"commands"</span>: [ ...command objects... ] }
+Each command includes:
+  <span class="k">"confidence"</span>:  <span class="n">0.87</span>,
+  <span class="k">"sourceQuote"</span>: <span class="s">"we need to add AML monitoring..."</span>,
+  <span class="k">"rationale"</span>:   <span class="s">"Explicitly mentioned in meeting."</span>
+
+Existing capability tree (YAML):
+<span class="c">- id: &lt;real-uuid-L0&gt;</span>
+<span class="c">  name: "Banking Capabilities"</span>
+<span class="c">  level: 0</span>
+<span class="c">  - id: &lt;real-uuid-L1-a&gt;</span>
+<span class="c">    name: "Risk Management"</span>
+<span class="c">    level: 1</span>
+<span class="c">    - id: &lt;real-uuid-L2-1&gt;</span>
+<span class="c">      name: "Credit Risk"</span>
+<span class="c">      level: 2</span>
+<span class="c">    ...</span>
+
+Current legend: [fill/border categories]
+<span class="c">// + contextPrompt if user provided</span>
+
+<span class="c">── USER ───────────────────────────────────────────────</span>
+&lt;filtered text from Pass 1&gt;</code></pre>
+            <strong>Output:</strong> <code>{ "commands": [ ...CommandProposalPayload[] ] }</code><br/>
+            Each command has standard DiagramCommand fields PLUS confidence, sourceQuote, rationale.
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="layer">Pass 3</div>
+        <div class="card c-llm">
+          <div class="title">LLM Call #3 — pass3Todos() — identical to no-template</div>
+          <div class="body">
+            pass2Summary = <code>"Proposed N diagram commands"</code> (not nodes, since edit mode).
+          </div>
+        </div>
+      </div>
+      <div class="arrow">Resolve → persist proposals → status = "ready_for_review"</div>
+
+      <div class="row">
+        <div class="layer">DB</div>
+        <div class="card c-db">
+          <div class="title"><span class="badge badge-write">WRITE</span> transcript_proposals — command kind</div>
+          <div class="body">
+            <pre><code><span class="c">-- One row per command proposal:</span>
+{ transcript_id, kind: <span class="s">"command"</span>, selected: <span class="t">true</span>,
+  payload: DiagramCommand + { confidence, sourceQuote, rationale } }
+
+<span class="c">-- One row per todo:</span>
+{ transcript_id, kind: <span class="s">"todo"</span>, ... }</code></pre>
+          </div>
+        </div>
+      </div>
+      <div class="arrow">Review modal shows command proposals (not node tree)</div>
+
+      <div class="row">
+        <div class="layer">Apply</div>
+        <div class="card c-db">
+          <div class="title"><span class="badge badge-post">POST</span> /api/transcripts/:id/apply → applyEdit.ts (for template mode)</div>
+          <div class="body">
+            Because template_id is set, <code>applyEdit.ts</code> is invoked even though mode = "new_diagram".<br/>
+            A <strong>copy</strong> of the template catalog is created as the user's new diagram,
+            then accepted commands are executed against it via <code>executeCommands()</code>.
+            <br/><br/>
+            <span class="badge badge-write">WRITE</span> New <code>capability_catalogs</code> row (copy of template)<br/>
+            <span class="badge badge-write">WRITE</span> New <code>capabilities</code> rows<br/>
+            <span class="badge badge-write">WRITE</span> Applied commands mutate the copies<br/>
+            Redirects to <code>/dashboard?catalogId=&lt;new-id&gt;</code>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /flow -->
+  </div><!-- /s4 -->
+
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!--  SECTION 5 — REACTFLOW EXECUTION                                     -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <div id="s5" class="section">
+    <h2 style="color:#f9a8d4;margin-bottom:16px">⑤ ReactFlow Execution — how commands become canvas nodes</h2>
+    <p style="font-size:13px;color:#64748b;margin-bottom:20px">
+      Every LLM command (from AI Editor or Transcript apply) goes through the same <code>executeCommands()</code> pipeline.
+      No ReactFlow API is called directly — Zustand state changes cause ReactFlow to re-render.
+    </p>
+
+    <div class="flow">
+
+      <div class="row">
+        <div class="layer">Commands in</div>
+        <div class="card c-react">
+          <div class="title">onAICommands(commands[]) called in dashboard page</div>
+          <div class="body">
+            Source: AIMapEditor <code>mode=command</code>, or proposal Accept, or transcript apply.<br/>
+            All paths converge at <code>applyAICommands(commands)</code> in <code>dashboard/page.tsx</code>.
+          </div>
+        </div>
+      </div>
+      <div class="arrow">executeCommands(commands, currentCapabilities, nodeStyles)</div>
+
+      <div class="row">
+        <div class="layer">Execute</div>
+        <div class="card c-api">
+          <div class="title">executeCommands() — src/lib/commands/index.ts</div>
+          <div class="body">
+            Processes each command in array order. Commands modify a mutable copy of the capabilities array + nodeStyles map.
+            <table>
+              <tr><th>Command</th><th>What it does</th><th>Zustand field changed</th></tr>
+              <tr><td>ADD_NODE</td><td>Appends new Capability object (real UUID assigned via makeUUID())</td><td>capabilities[]</td></tr>
+              <tr><td>RENAME_NODE</td><td>Finds by nodeId, updates .name</td><td>capabilities[]</td></tr>
+              <tr><td>DELETE_NODE</td><td>Marks is_deleted=true (soft delete), optionally reparents children</td><td>capabilities[]</td></tr>
+              <tr><td>REPARENT_NODE</td><td>Changes .parent_id on the target</td><td>capabilities[]</td></tr>
+              <tr><td>SET_STYLE</td><td>Sets nodeStyles[nodeId].fill / .border</td><td>nodeStyles{}</td></tr>
+              <tr><td>SET_NOTE</td><td>Sets nodeStyles[nodeId].note</td><td>nodeStyles{}</td></tr>
+              <tr><td>SET_DESCRIPTION</td><td>Sets nodeStyles[nodeId].description</td><td>nodeStyles{}</td></tr>
+              <tr><td>SET_TEXT_COLOR</td><td>Sets nodeStyles[nodeId].textColor</td><td>nodeStyles{}</td></tr>
+              <tr><td>RESET_STYLE</td><td>Deletes specific style keys from nodeStyles[nodeId]</td><td>nodeStyles{}</td></tr>
+              <tr><td>SET_LEGEND</td><td>Upserts entry in legend.fill / legend.border / legend.textColor</td><td>legend{}</td></tr>
+              <tr><td>REMOVE_LEGEND</td><td>Removes entry from legend array</td><td>legend{}</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="arrow">Returns { capabilities, nodeStyles } → Zustand store updated</div>
+
+      <div class="row">
+        <div class="layer">Zustand</div>
+        <div class="card c-fe">
+          <div class="title">catalogStore.ts — state update triggers ReactFlow re-render</div>
+          <div class="body">
+            <pre><code><span class="c">// Zustand store (simplified)</span>
+{
+  capabilities:  Capability[],  <span class="c">// ← all nodes</span>
+  nodeStyles:    Record&lt;string, NodeStylePatch&gt;,
+  legend:        LegendConfig,
+  isDirty:       <span class="t">true</span>          <span class="c">// ← "Apply" button activates</span>
+}
+
+<span class="c">// ReactFlow reads this via selector</span>
+<span class="k">const</span> nodes = useMemo(() => capabilitiesToNodes(capabilities, nodeStyles), [capabilities, nodeStyles]);
+<span class="k">const</span> edges = useMemo(() => capabilitiesToEdges(capabilities), [capabilities]);</code></pre>
+            ReactFlow re-renders nodes/edges purely from Zustand state — no direct ReactFlow API mutations.
+            <br/>Canvas is not persisted to DB until "Apply".
+          </div>
+        </div>
+      </div>
+      <div class="arrow">User clicks "Apply" in header</div>
+
+      <div class="row">
+        <div class="layer">Save</div>
+        <div class="card c-db">
+          <div class="title"><span class="badge badge-post">POST</span> /api/catalogs/save — Supabase bulk upsert</div>
+          <div class="body">
+            <pre><code><span class="c">// Body sent:</span>
+{
+  catalogId:    <span class="s">"&lt;uuid or null for new&gt;"</span>,
+  catalogName:  <span class="s">"Retail Bank"</span>,
+  capabilities: Capability[],    <span class="c">// full array</span>
+  nodeStyles:   Record&lt;string, NodeStylePatch&gt;,
+  clientName:   <span class="s">"ACME Corp"</span>
+}
+
+<span class="c">// Supabase operations:</span>
+<span class="c">-- 1. Upsert capability_catalogs row (name, node_styles, chat_history, legend)</span>
+<span class="c">-- 2. Upsert all capabilities rows (bulk)</span>
+<span class="c">-- 3. Soft-delete capabilities marked is_deleted=true</span>
+<span class="c">-- Returns: { catalogId }</span></code></pre>
+            After save: <code>isDirty = false</code>, "Apply" button dims.
+          </div>
+        </div>
+      </div>
+      <div class="arrow">DB write complete → canvas is now persisted</div>
+
+      <div class="row">
+        <div class="layer">Undo Stack</div>
+        <div class="card c-fe">
+          <div class="title">Command history for undo — local only</div>
+          <div class="body">
+            Each accepted command is pushed onto a local undo stack in Zustand.
+            Undo replays the inverse operation locally — does <strong>not</strong> call any API.
+            Only "Apply" persists to DB, so undone changes that were never applied are never written.
+          </div>
+        </div>
+      </div>
+
+      <hr/>
+
+      <!-- SUMMARY TABLE -->
+      <div class="card c-info" style="border-color:#334155;margin:8px 0;">
+        <div class="title" style="color:#94a3b8;margin-bottom:8px">All API calls + DB writes per flow — summary</div>
+        <div class="body">
+          <table>
+            <tr>
+              <th>Flow</th>
+              <th>LLM calls</th>
+              <th>API routes hit</th>
+              <th>DB writes</th>
+            </tr>
+            <tr>
+              <td>Blank AI → first prompt</td>
+              <td>1 (gpt-4.1-mini)</td>
+              <td>POST /api/transform</td>
+              <td>chat_history, ai_usage_log; then /api/catalogs/save on Apply</td>
+            </tr>
+            <tr>
+              <td>AI Editor follow-up message</td>
+              <td>1 (gpt-4.1-mini)</td>
+              <td>POST /api/transform</td>
+              <td>chat_history append, ai_usage_log; canvas changes deferred to Apply</td>
+            </tr>
+            <tr>
+              <td>Transcript (no template)</td>
+              <td>3 (gpt-4.1-mini)</td>
+              <td>POST /api/transcripts, GET /stream, PATCH /proposals, POST /apply</td>
+              <td>meeting_transcripts, transcript_proposals, capabilities, capability_catalogs</td>
+            </tr>
+            <tr>
+              <td>Transcript (with template)</td>
+              <td>3 (gpt-4.1-mini)</td>
+              <td>POST /api/transcripts, GET /stream, GET capabilities (template), PATCH /proposals, POST /apply</td>
+              <td>meeting_transcripts, transcript_proposals, new capability_catalogs (copy), capabilities</td>
+            </tr>
+            <tr>
+              <td>User clicks "Apply" (any flow)</td>
+              <td>0</td>
+              <td>POST /api/catalogs/save</td>
+              <td>capability_catalogs (upsert), capabilities (bulk upsert)</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /flow -->
+  </div><!-- /s5 -->
+
+</main>
+
+<script>
+function showSection(id, btn) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  document.querySelectorAll('#mainNav button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function showMode(id, btn) {
+  const parent = btn.closest('.section');
+  parent.querySelectorAll('.mode-section').forEach(s => s.classList.remove('on'));
+  parent.querySelectorAll('.mode-tab').forEach(b => b.classList.remove('on'));
+  document.getElementById(id).classList.add('on');
+  btn.classList.add('on');
+}
+</script>
+</body>
+</html>
