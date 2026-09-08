@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { ClientFolder, ClientCatalog, RecentCommit } from "@/types/capability";
+import type { Client, ClientFolder, ClientCatalog, RecentCommit } from "@/types/capability";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -34,14 +34,42 @@ const CLIENT_ACCENT: string[] = [
 
 // ── DiagramRow ────────────────────────────────────────────────────────────────
 
-function DiagramRow({ cat, canArchive, onArchived }: {
+function DiagramRow({ cat, canArchive, clientFolders = [], onArchived, onMoved }: {
   cat: ClientCatalog;
   canArchive: boolean;
+  clientFolders?: Client[];
   onArchived?: () => void;
+  onMoved?: () => void;
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [archiving, setArchiving]     = useState(false);
+  const [moving, setMoving]           = useState(false);
   const commits = cat.recent_commits ?? [];
+
+  const moveToFolder = async (clientId: string) => {
+    if (!clientId || moving) return;
+    const target = clientFolders.find((folder) => folder.id === clientId);
+    if (!target) return;
+    if (!confirm(`Add "${cat.name}" to "${target.name}"?`)) return;
+
+    setMoving(true);
+    try {
+      const res = await fetch(`/api/clients/${encodeURIComponent(clientId)}/catalogs`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ catalogId: cat.id }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Failed to add diagram to folder");
+      }
+      onMoved?.();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to add diagram to folder");
+    } finally {
+      setMoving(false);
+    }
+  };
 
   return (
     <div>
@@ -109,19 +137,41 @@ function DiagramRow({ cat, canArchive, onArchived }: {
             disabled={archiving}
             onClick={async (e) => {
               e.stopPropagation();
-              if (!confirm(`Archive "${cat.name}"? It will be hidden but can be restored.`)) return;
+              if (!confirm(`Delete "${cat.name}"? It will be hidden from My Works and can be restored by an admin.`)) return;
               setArchiving(true);
-              await fetch(`/api/catalogs/${cat.id}/archive`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
-              setArchiving(false);
-              onArchived?.();
+              try {
+                const res = await fetch(`/api/catalogs/${cat.id}/archive`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+                if (!res.ok) {
+                  const data = await res.json().catch(() => ({}));
+                  throw new Error(data.error ?? "Failed to delete diagram");
+                }
+                onArchived?.();
+              } catch (err) {
+                alert(err instanceof Error ? err.message : "Failed to delete diagram");
+              } finally {
+                setArchiving(false);
+              }
             }}
-            className="ml-1 shrink-0 rounded p-1 text-slate-300 hover:text-amber-500 disabled:opacity-50"
-            title="Archive diagram"
+            className="ml-1 shrink-0 rounded-md border border-red-100 px-2 py-1 text-xs font-semibold text-red-500 hover:border-red-200 hover:bg-red-50 disabled:opacity-50"
+            title="Delete diagram"
           >
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
-            </svg>
+            <span>{archiving ? "Deleting..." : "Delete"}</span>
           </button>
+        )}
+        {clientFolders.length > 0 && (
+          <select
+            disabled={moving}
+            value=""
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => moveToFolder(e.target.value)}
+            className="ml-1 shrink-0 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-500 hover:border-brand-300 hover:text-brand-700 disabled:opacity-50"
+            title="Add diagram to folder"
+          >
+            <option value="">{moving ? "Adding..." : "Add to folder"}</option>
+            {clientFolders.map((folder) => (
+              <option key={folder.id} value={folder.id}>{folder.name}</option>
+            ))}
+          </select>
         )}
       </div>
 
@@ -166,10 +216,12 @@ function ClientAccordion({
   folder,
   accentColor,
   defaultOpen,
+  onRefresh,
 }: {
   folder: ClientFolder;
   accentColor: string;
   defaultOpen: boolean;
+  onRefresh: () => void;
 }) {
   const [open, setOpen] = useState(defaultOpen);
 
@@ -210,7 +262,7 @@ function ClientAccordion({
           {folder.catalogs.length === 0 ? (
             <p className="px-4 py-3 text-xs text-slate-400">No diagrams in this client folder yet.</p>
           ) : (
-            folder.catalogs.map((cat) => <DiagramRow key={cat.id} cat={cat} canArchive={false} />)
+            folder.catalogs.map((cat) => <DiagramRow key={cat.id} cat={cat} canArchive onArchived={onRefresh} />)
           )}
         </div>
       )}
@@ -220,7 +272,7 @@ function ClientAccordion({
 
 // ── MyDiagramsSection ─────────────────────────────────────────────────────────
 
-function MyDiagramsSection({ catalogs, onRefresh }: { catalogs: ClientCatalog[]; onRefresh: () => void }) {
+function MyDiagramsSection({ catalogs, clientFolders, onRefresh }: { catalogs: ClientCatalog[]; clientFolders: Client[]; onRefresh: () => void }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -267,7 +319,7 @@ function MyDiagramsSection({ catalogs, onRefresh }: { catalogs: ClientCatalog[];
           ) : (
             <div className="border-t border-slate-100 px-1 py-1">
               {catalogs.map((cat) => (
-                <DiagramRow key={cat.id} cat={cat} canArchive onArchived={onRefresh} />
+                <DiagramRow key={cat.id} cat={cat} canArchive clientFolders={clientFolders} onArchived={onRefresh} onMoved={onRefresh} />
               ))}
             </div>
           )
@@ -284,14 +336,19 @@ export default function ClientFolders() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [clientSectionOpen, setClientSectionOpen] = useState(false);
+  const [availableClients, setAvailableClients] = useState<Client[]>([]);
 
   const fetchFolders = () => {
     setLoading(true);
-    fetch("/api/my-works")
-      .then((r) => r.json())
-      .then((data) => {
-        if (Array.isArray(data)) setFolders(data);
-        else setError(data.error ?? "Failed to load");
+    Promise.all([
+      fetch("/api/my-works").then((r) => r.json()),
+      fetch("/api/clients").then((r) => r.json()),
+    ])
+      .then(([worksData, clientsData]) => {
+        if (Array.isArray(worksData)) setFolders(worksData);
+        else setError(worksData.error ?? "Failed to load");
+
+        if (Array.isArray(clientsData)) setAvailableClients(clientsData);
       })
       .catch(() => setError("Network error"))
       .finally(() => setLoading(false));
@@ -323,7 +380,7 @@ export default function ClientFolders() {
   return (
     <div>
       {/* ── My Diagrams ── */}
-      <MyDiagramsSection catalogs={myDiagrams?.catalogs ?? []} onRefresh={fetchFolders} />
+      <MyDiagramsSection catalogs={myDiagrams?.catalogs ?? []} clientFolders={availableClients} onRefresh={fetchFolders} />
 
       {/* ── Client Diagrams (collapsible) ── */}
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
@@ -365,6 +422,7 @@ export default function ClientFolders() {
                     folder={folder}
                     accentColor={CLIENT_ACCENT[idx % CLIENT_ACCENT.length]}
                     defaultOpen={false}
+                    onRefresh={fetchFolders}
                   />
                 ))}
                 <Link href="/clients" className="mt-2 block text-center text-xs text-brand-600 hover:text-brand-800 font-medium py-2">

@@ -42,7 +42,7 @@ export async function GET() {
   const { data, error } = await db
     .from("capability_catalogs")
     .select(
-      `id, name, client_name, industry, updated_at, chat_history,
+      `id, name, client_name, client_id, industry, updated_at, chat_history,
        capabilities(count)`
     )
     .eq("user_id", user.id)
