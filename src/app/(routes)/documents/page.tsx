@@ -8,12 +8,10 @@ import { convertRowsToCapabilities } from "@/lib/parser/rowsToCapabilities";
 import { showToast } from "@/components/ui/Toast";
 
 const SAMPLE_COLUMNS = [
-  { key: "L0", label: "L0", value: "Strategic Portfolio",  bg: "bg-navy-950",  text: "text-white" },
-  { key: "L1", label: "L1", value: "Strategy & OKR",       bg: "bg-brand-800", text: "text-white" },
-  { key: "L2", label: "L2", value: "Strategy Mgmt",        bg: "bg-brand-600", text: "text-white" },
-  { key: "L3", label: "L3", value: "Strategy Definition",  bg: "bg-brand-300", text: "text-navy-950" },
-  { key: "Description", label: "Description",              bg: "bg-slate-100", text: "text-slate-700",
-    value: "Ability to define…" },
+  { key: "Level", label: "Level", value: "L0", bg: "bg-navy-950", text: "text-white" },
+  { key: "Capability Name", label: "Capability Name", value: "Strategic Portfolio", bg: "bg-brand-800", text: "text-white" },
+  { key: "Description", label: "Description", bg: "bg-slate-100", text: "text-slate-700",
+    value: "Ability to define..." },
 ];
 
 type ParsedRow = Record<string, string>;
@@ -67,14 +65,22 @@ export default function DocumentsUploadPage() {
     }
   };
 
-  // Validate that the headers contain at least one L-column and optionally a Description column
+  // Validate that the headers contain either L-columns or Level + Name columns.
   const validateFormat = (headers: string[]) => {
     const normalised = headers.map(h => h.trim().toUpperCase());
     const lCols = normalised.filter(h => /^L\d+/.test(h.replace(/\s.*/,"")));
+    const hasLevel = normalised.some(h => h === "LEVEL");
+    const hasName = normalised.some(h => h === "CAPABILITY NAME" || h === "CAPABILITY" || h === "NAME" || h === "TITLE");
     const hasDesc = normalised.some(h => h.includes("DESCRIPTION") || h.includes("DESC"));
-    if (lCols.length === 0) {
+    if (lCols.length === 0 && (!hasLevel || !hasName)) {
       setFormatValid(false);
-      setFormatMessage("No L-level columns found (e.g. L0 Capability Name, L1 Capability Name…). Please check your file matches the expected format.");
+      setFormatMessage("No hierarchy columns found. Use L0/L1/L2/L3 columns, or use Level + Capability Name columns.");
+      return;
+    }
+    if (lCols.length === 0) {
+      const descNote = hasDesc ? " + Description" : " (no Description column detected)";
+      setFormatValid(true);
+      setFormatMessage(`Format matched — detected columns: Level, Capability Name${descNote}.`);
       return;
     }
     const detected = lCols.map(c => c.split(/\s/)[0]).join(", ");
@@ -141,8 +147,16 @@ export default function DocumentsUploadPage() {
   // Detect L-level columns (L0 Capability Name, L1 Capability Name, etc.)
   const getLCols = () => previewHeaders.filter(h => /^l\d+/i.test(h.trim().replace(/\s.*/,"")));
 
+  const getLevelCol = () => previewHeaders.find(h => /^level$/i.test(h.trim()));
+
   // Returns the deepest non-empty L-column index for a row (-1 if none)
   const rowLevel = (row: ParsedRow, lCols: string[]) => {
+    const levelCol = lCols.length === 0 ? getLevelCol() : null;
+    if (levelCol) {
+      const value = String(row[levelCol] ?? "").trim().toUpperCase();
+      const match = value.match(/^L?([0-3])$/) ?? value.match(/^LEVEL\s*([0-3])$/);
+      return match ? Number(match[1]) : -1;
+    }
     let lvl = -1;
     lCols.forEach((c, i) => { if (String(row[c] ?? "").trim()) lvl = i; });
     return lvl;
@@ -353,7 +367,7 @@ export default function DocumentsUploadPage() {
                 ))}
               </div>
             </div>
-            <p className="mt-3 text-[11px] text-slate-400">L0 = top-level category · L1–L3 = nested sub-categories · Description is optional</p>
+            <p className="mt-3 text-[11px] text-slate-400">Level accepts L0, L1, L2, or L3. Rows should be ordered parent first. Description is optional.</p>
           </div>
         )}
       </main>

@@ -31,8 +31,7 @@ import { buildCanvasNodes } from "@/lib/canvas/layoutEngine";
 import { handleNodeDragDrop } from "@/lib/canvas/dragDropHandler";
 import { executeCommands } from "@/lib/commands/executor";
 import type { DiagramCommand, NodeStylePatch } from "@/lib/commands/index";
-import { mergeNodeStyleMaps, mergeStyleCategoryLegend, resolveCapabilityCategoryStyles } from "@/lib/capabilityStyles";
-import type { Capability, CapabilityStyleCategory } from "@/types/capability";
+import type { Capability } from "@/types/capability";
 import { useCatalogStore } from "@/stores/catalogStore";
 import type { LegendEntry } from "@/stores/catalogStore";
 
@@ -172,8 +171,6 @@ function DashboardContent() {
   const storeCatalogId = useCatalogStore((s) => s.catalogId);
   const catalogName = useCatalogStore((s) => s.catalogName);
   const isDirty = useCatalogStore((s) => s.isDirty);
-  const styleCategories = useCatalogStore((s) => s.styleCategories);
-  const legend = useCatalogStore((s) => s.legend);
   const loadFromDB = useCatalogStore((s) => s.loadFromDB);
   const markSaved = useCatalogStore((s) => s.markSaved);
 
@@ -226,15 +223,12 @@ function DashboardContent() {
 
   // Wrapper that syncs local state to Zustand store (does NOT push undo — use pushUndoAndSet for that)
   const setNodeStyles = useCallback((updater: Record<string, NodeStylePatch> | ((prev: Record<string, NodeStylePatch>) => Record<string, NodeStylePatch>)) => {
-    const next = typeof updater === "function" ? updater(nodeStylesRef.current) : updater;
-    nodeStylesRef.current = next;
-    setNodeStylesLocal(next);
-    useCatalogStore.setState({ nodeStyles: next, isDirty: true });
+    setNodeStylesLocal((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      useCatalogStore.setState({ nodeStyles: next });
+      return next;
+    });
   }, []);
-  const categoryStyles = useMemo(
-    () => resolveCapabilityCategoryStyles(capabilities, styleCategories),
-    [capabilities, styleCategories]
-  );
   // AI Map Editor panel state
   const [aiPanelOpen, setAiPanelOpen] = useState(isAiMode);
   const [aiPickMode, setAiPickMode] = useState(false);
@@ -294,23 +288,10 @@ function DashboardContent() {
           setUndoStack([]);
           setRedoStack([]);
           loadFromDB(catalogIdParam, data.catalog.name || catalogIdParam, data.capabilities);
-          const categories: CapabilityStyleCategory[] = Array.isArray(data.styleCategories)
-            ? data.styleCategories
-            : [];
-          const legacyLegend = data.catalog.chat_history?.legend ?? { fill: [], border: [], textColor: [] };
-          const categoryStyles = resolveCapabilityCategoryStyles(data.capabilities, categories);
-          const legacyStyles = data.catalog.node_styles && typeof data.catalog.node_styles === "object"
-            ? data.catalog.node_styles
-            : {};
-          const effectiveStyles = mergeNodeStyleMaps(categoryStyles, legacyStyles);
-          nodeStylesRef.current = effectiveStyles;
-          setNodeStylesLocal(effectiveStyles);
-          useCatalogStore.setState({
-            nodeStyles: effectiveStyles,
-            styleCategories: categories,
-            legend: mergeStyleCategoryLegend(legacyLegend, categories),
-            isDirty: false,
-          });
+          // Load saved node styles from DB
+          if (data.catalog.node_styles && typeof data.catalog.node_styles === "object") {
+            setNodeStyles(data.catalog.node_styles);
+          }
           // Set role: null → treat as viewer (safe default)
           setUserRole(data.userRole ?? null);
           dataLoadedRef.current = true;
@@ -460,7 +441,7 @@ function DashboardContent() {
     }
 
     const nextNodes = buildCanvasNodes(capabilities, visibleLevels).map((node) => {
-      const styles = { ...(categoryStyles[node.id] ?? {}), ...(nodeStyles[node.id] ?? {}) };
+      const styles = nodeStyles[node.id];
       const isSelected = selectedNodeIds.has(node.id);
       const isAiTarget = node.id === aiTargetNodeId;
       const level = node.data.level;
@@ -475,7 +456,7 @@ function DashboardContent() {
     });
 
     setNodes(nextNodes);
-  }, [capabilities, selectedNodeIds, aiTargetNodeId, aiPickMode, visibleLevels, nodeStyles, categoryStyles]);
+  }, [capabilities, selectedNodeIds, aiTargetNodeId, aiPickMode, visibleLevels, nodeStyles]);
 
   const onNodeDragStart: NodeDragHandler = useCallback((_, node) => {
     setSelectedNodeId(node.id);
@@ -967,7 +948,6 @@ function DashboardContent() {
           catalogName,
           capabilities,
           nodeStyles,
-          legend,
         }),
       });
       const data = await res.json();

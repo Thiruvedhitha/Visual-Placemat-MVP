@@ -40,15 +40,7 @@ export async function POST(
   try {
     if (tx.mode === "new_diagram") {
       const result = await applyNew(params.id, user.id);
-      return NextResponse.json({
-        ok: true,
-        catalogId: result.catalogId,
-        nodesCreated: result.nodesCreated,
-        appliedCount: result.appliedCount,
-        failedCount: result.failedCount,
-        messages: result.messages,
-        errors: result.errors,
-      });
+      return NextResponse.json({ ok: true, catalogId: result.catalogId, nodesCreated: result.nodesCreated });
     } else {
       if (!tx.catalog_id) {
         return NextResponse.json({ error: "catalog_id missing on transcript" }, { status: 400 });
