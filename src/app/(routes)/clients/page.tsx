@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import type { Client } from "@/types/capability";
 
 export default function ClientsPage() {
@@ -10,6 +11,7 @@ export default function ClientsPage() {
   const [newName, setNewName] = useState("");
   const [newIndustry, setNewIndustry] = useState("");
   const [creating, setCreating] = useState(false);
+  const [actionClientId, setActionClientId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchClients();
@@ -45,6 +47,47 @@ export default function ClientsPage() {
       }
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleRename(client: Client) {
+    const name = prompt("Rename client folder", client.name)?.trim();
+    if (!name || name === client.name) return;
+
+    setActionClientId(client.id);
+    try {
+      const res = await fetch(`/api/clients/${client.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Failed to rename client folder");
+      }
+      fetchClients();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to rename client folder");
+    } finally {
+      setActionClientId(null);
+    }
+  }
+
+  async function handleDelete(client: Client) {
+    if (!confirm(`Delete "${client.name}"? Diagrams in this folder will move back to My Diagrams.`)) return;
+
+    setActionClientId(client.id);
+    try {
+      const res = await fetch(`/api/clients/${client.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Failed to delete client folder");
+      }
+      fetchClients();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to delete client folder");
+    } finally {
+      setActionClientId(null);
     }
   }
 
@@ -142,33 +185,59 @@ export default function ClientsPage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {clients.map((client) => (
-              <a
+              <div
                 key={client.id}
-                href={`/clients/${client.id}`}
                 className="group bg-white rounded-xl border border-gray-200 p-6 hover:shadow-md hover:border-brand-300 transition-all"
               >
                 <div className="flex items-start justify-between">
                   <div className="w-10 h-10 bg-brand-50 rounded-lg flex items-center justify-center text-brand-600 font-bold text-lg">
                     {client.name.charAt(0).toUpperCase()}
                   </div>
-                  {client.industry && (
-                    <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full">
-                      {client.industry}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {client.industry && (
+                      <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full">
+                        {client.industry}
+                      </span>
+                    )}
+                    {client.role === "admin" && (
+                      <span className="text-xs bg-brand-50 text-brand-700 px-2 py-1 rounded-full font-medium">
+                        admin
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <h3 className="mt-4 font-semibold text-gray-900 group-hover:text-brand-600 transition-colors">
+                <Link href={`/clients/${client.id}`} className="mt-4 block font-semibold text-gray-900 group-hover:text-brand-600 transition-colors">
                   {client.name}
-                </h3>
+                </Link>
                 {client.description && (
                   <p className="text-sm text-gray-500 mt-1 line-clamp-2">
                     {client.description}
                   </p>
                 )}
-                <p className="text-xs text-gray-400 mt-3">
-                  Created {new Date(client.created_at).toLocaleDateString()}
-                </p>
-              </a>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <p className="text-xs text-gray-400">
+                    Created {new Date(client.created_at).toLocaleDateString()}
+                  </p>
+                  {client.role === "admin" && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        disabled={actionClientId === client.id}
+                        onClick={() => handleRename(client)}
+                        className="rounded-md border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50"
+                      >
+                        Rename
+                      </button>
+                      <button
+                        disabled={actionClientId === client.id}
+                        onClick={() => handleDelete(client)}
+                        className="rounded-md border border-red-100 px-2 py-1 text-xs font-medium text-red-500 hover:border-red-200 hover:bg-red-50 disabled:opacity-50"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
             ))}
           </div>
         )}

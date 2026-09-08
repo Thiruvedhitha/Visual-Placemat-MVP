@@ -10,7 +10,7 @@ export async function getClientsForUser(userId: string): Promise<Client[]> {
   // Step 1: get client IDs user is a member of
   const { data: memberships, error: memError } = await db
     .from("client_members")
-    .select("client_id")
+    .select("client_id, role")
     .eq("user_id", userId);
 
   if (memError) throw memError;
@@ -25,7 +25,8 @@ export async function getClientsForUser(userId: string): Promise<Client[]> {
     .order("name");
 
   if (error) throw error;
-  return (data ?? []) as Client[];
+  const roleMap = new Map((memberships ?? []).map((m) => [m.client_id, m.role]));
+  return (data ?? []).map((client) => ({ ...client, role: roleMap.get(client.id) })) as Client[];
 }
 
 /** Get a single client by ID (no auth check — use RLS or verify membership upstream) */

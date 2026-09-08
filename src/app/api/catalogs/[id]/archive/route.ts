@@ -34,7 +34,17 @@ export async function POST(
     })
     .eq("id", catalogId);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    const missingArchiveColumns = /archived_at|archived_by|archive_reason/i.test(error.message);
+    if (!missingArchiveColumns) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    const { error: fallbackError } = await db
+      .from("capability_catalogs")
+      .update({ status: "archived" })
+      .eq("id", catalogId);
+
+    if (fallbackError) return NextResponse.json({ error: fallbackError.message }, { status: 500 });
+  }
 
   await logAudit({
     actorId:    user.id,

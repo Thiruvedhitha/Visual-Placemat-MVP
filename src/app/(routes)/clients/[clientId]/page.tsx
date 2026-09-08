@@ -38,9 +38,12 @@ export default function ClientDetailPage() {
   const [renameName, setRenameName] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [showActions, setShowActions] = useState(false);
+  const [availableClients, setAvailableClients] = useState<Client[]>([]);
+  const [catalogActionId, setCatalogActionId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchClient();
+    fetchClients();
   }, [clientId]);
 
   async function fetchClient() {
@@ -56,6 +59,11 @@ export default function ClientDetailPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function fetchClients() {
+    const res = await fetch("/api/clients");
+    if (res.ok) setAvailableClients(await res.json());
   }
 
   async function openTemplatePicker() {
@@ -117,15 +125,88 @@ export default function ClientDetailPage() {
     }
   }
 
-  async function handleArchive() {
-    if (!confirm("Archive this client folder? All maps will be hidden but not deleted.")) return;
-    // Archive all catalogs in this folder
-    const res = await fetch(`/api/clients/${clientId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ description: `[ARCHIVED] ${client?.description || ""}` }),
-    });
+  async function handleDeleteFolder() {
+    if (!client) return;
+    const message = client.catalogs.length > 0
+      ? `Delete "${client.name}"? Its ${client.catalogs.length} diagram${client.catalogs.length !== 1 ? "s" : ""} will move back to My Diagrams.`
+      : `Delete "${client.name}"?`;
+    if (!confirm(message)) return;
+
+    const res = await fetch(`/api/clients/${clientId}`, { method: "DELETE" });
     if (res.ok) router.push("/clients");
+    else {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error ?? "Failed to delete folder");
+    }
+  }
+
+  async function renameCatalog(catalog: CapabilityCatalog) {
+    const name = prompt("Rename diagram", catalog.name)?.trim();
+    if (!name || name === catalog.name) return;
+    setCatalogActionId(catalog.id);
+    try {
+      const res = await fetch(`/api/catalogs/${catalog.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Failed to rename diagram");
+      }
+      fetchClient();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to rename diagram");
+    } finally {
+      setCatalogActionId(null);
+    }
+  }
+
+  async function moveCatalog(catalog: CapabilityCatalog, value: string) {
+    if (!value) return;
+    const targetClientId = value === "__my_diagrams__" ? null : value;
+    const target = targetClientId ? availableClients.find((c) => c.id === targetClientId) : null;
+    const targetLabel = target?.name ?? "My Diagrams";
+    if (!confirm(`${targetClientId ? "Move" : "Remove"} "${catalog.name}" ${targetClientId ? `to "${targetLabel}"` : "from this folder"}?`)) return;
+
+    setCatalogActionId(catalog.id);
+    try {
+      const res = await fetch(`/api/catalogs/${catalog.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: targetClientId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Failed to move diagram");
+      }
+      fetchClient();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to move diagram");
+    } finally {
+      setCatalogActionId(null);
+    }
+  }
+
+  async function archiveCatalog(catalog: CapabilityCatalog) {
+    if (!confirm(`Delete "${catalog.name}"? It will be hidden but can be restored by an admin.`)) return;
+    setCatalogActionId(catalog.id);
+    try {
+      const res = await fetch(`/api/catalogs/${catalog.id}/archive`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Failed to delete diagram");
+      }
+      fetchClient();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to delete diagram");
+    } finally {
+      setCatalogActionId(null);
+    }
   }
 
   async function handleExportAll() {
@@ -202,22 +283,22 @@ export default function ClientDetailPage() {
                   ⋯
                 </button>
                 {showActions && (
-                  <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg border border-gray-200 shadow-lg z-20">
+                  <div className="absolute right-0 mt-2 w-52 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-xl shadow-gray-200/70 z-20">
                     <button
                       onClick={() => { setShowActions(false); setRenameName(client.name); setShowRename(true); }}
-                      className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 rounded-t-lg"
+                      className="w-full text-left px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-brand-50 hover:text-brand-700"
                     >
                       Rename Folder
                     </button>
                     <button
-                      onClick={() => { setShowActions(false); handleArchive(); }}
-                      className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 text-amber-600"
+                      onClick={() => { setShowActions(false); handleDeleteFolder(); }}
+                      className="w-full text-left px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50"
                     >
-                      Archive Folder
+                      Delete Folder
                     </button>
                     <button
                       onClick={() => { setShowActions(false); handleExportAll(); }}
-                      className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 rounded-b-lg"
+                      className="w-full text-left px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
                     >
                       Export All Maps
                     </button>
@@ -349,14 +430,14 @@ export default function ClientDetailPage() {
             </p>
           </div>
         ) : (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Map Name</th>
                   <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
                   <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Last Modified</th>
-                  <th className="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase">Action</th>
+                  <th className="text-right px-6 py-3 text-xs font-medium text-gray-500 uppercase">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -388,12 +469,51 @@ export default function ClientDetailPage() {
                       {new Date(catalog.updated_at).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <a
-                        href={`/dashboard?catalogId=${catalog.id}`}
-                        className="text-sm text-brand-600 hover:text-brand-800 font-medium"
-                      >
-                        Open →
-                      </a>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        <a
+                          href={`/dashboard?catalogId=${catalog.id}`}
+                          className="inline-flex h-8 items-center rounded-md bg-brand-600 px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-700"
+                        >
+                          Open
+                        </a>
+                        {canEdit && (
+                          <>
+                            <button
+                              disabled={catalogActionId === catalog.id}
+                              onClick={() => renameCatalog(catalog)}
+                              className="inline-flex h-8 items-center rounded-md border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-600 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50"
+                            >
+                              Rename
+                            </button>
+                            <div className="relative">
+                              <select
+                                disabled={catalogActionId === catalog.id}
+                                value=""
+                                onChange={(e) => moveCatalog(catalog, e.target.value)}
+                                className="h-8 min-w-[132px] appearance-none rounded-md border border-gray-200 bg-white px-3 pr-8 text-xs font-semibold text-gray-600 transition hover:border-brand-200 hover:bg-gray-50 hover:text-brand-700 disabled:opacity-50"
+                              >
+                                <option value="">Move</option>
+                                <option value="__my_diagrams__">Remove from folder</option>
+                                {availableClients.filter((c) => c.id !== clientId).map((folder) => (
+                                  <option key={folder.id} value={folder.id}>{folder.name}</option>
+                                ))}
+                              </select>
+                              <svg className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                              </svg>
+                            </div>
+                          </>
+                        )}
+                        {client.role === "admin" && (
+                          <button
+                            disabled={catalogActionId === catalog.id}
+                            onClick={() => archiveCatalog(catalog)}
+                            className="inline-flex h-8 items-center rounded-md border border-red-100 bg-white px-3 text-xs font-semibold text-red-500 transition hover:border-red-200 hover:bg-red-50 disabled:opacity-50"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

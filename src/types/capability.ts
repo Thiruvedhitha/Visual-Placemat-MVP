@@ -5,6 +5,7 @@ export interface Client {
   description: string | null;
   logo_url: string | null;
   created_by: string | null;
+  role?: "admin" | "editor" | "viewer";
   created_at: string;
   updated_at: string;
 }
@@ -153,6 +154,8 @@ export interface ClientCatalog {
 }
 
 export interface ClientFolder {
+  client_id: string | null;
   client_name: string;
+  role?: "admin" | "editor" | "viewer" | null;
   catalogs: ClientCatalog[];
 }

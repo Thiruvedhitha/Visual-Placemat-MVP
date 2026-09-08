@@ -21,7 +21,9 @@ export interface ClientCatalogItem {
 }
 
 export interface ClientFolder {
+  client_id: string | null;
   client_name: string;
+  role: "admin" | "editor" | "viewer" | null;
   catalogs: ClientCatalogItem[];
 }
 
@@ -56,7 +58,7 @@ export async function GET() {
   // 2. Get client folders the user is a member of + their catalogs
   const { data: memberships } = await db
     .from("client_members")
-    .select("client_id")
+    .select("client_id, role")
     .eq("user_id", user.id);
 
   const clientIds = (memberships ?? []).map((m) => m.client_id);
@@ -78,6 +80,7 @@ export async function GET() {
 
   // 3. Get client names for mapping
   let clientNameMap = new Map<string, string>();
+  const clientRoleMap = new Map((memberships ?? []).map((m) => [m.client_id, m.role as "admin" | "editor" | "viewer"]));
   if (clientIds.length > 0) {
     const { data: clients } = await db
       .from("clients")
@@ -90,13 +93,13 @@ export async function GET() {
   }
 
   // Group by client_name (null → "My Diagrams")
-  const folderMap = new Map<string, ClientCatalogItem[]>();
+  const folderMap = new Map<string, { clientId: string | null; role: "admin" | "editor" | "viewer" | null; catalogs: ClientCatalogItem[] }>();
 
   for (const row of data ?? []) {
     // Skip catalogs that belong to a client folder (they'll show under client)
     if ((row as Record<string, unknown>).client_id) continue;
     const key: string = row.client_name ?? "My Diagrams";
-    if (!folderMap.has(key)) folderMap.set(key, []);
+    if (!folderMap.has(key)) folderMap.set(key, { clientId: null, role: "admin", catalogs: [] });
 
     type CommitEntry = { summary: string; adds: number; deletes: number; renames: number; styles: number; ts: string };
     type ChatHistory = { commits?: CommitEntry[] };
@@ -113,7 +116,7 @@ export async function GET() {
         ts: c.ts || row.updated_at,
       }));
 
-    folderMap.get(key)!.push({
+    folderMap.get(key)!.catalogs.push({
       id: row.id,
       name: row.name,
       industry: row.industry ?? null,
@@ -129,7 +132,7 @@ export async function GET() {
   for (const row of clientCatalogs) {
     const cId = (row as Record<string, unknown>).client_id as string;
     const key = clientNameMap.get(cId) || "Unknown Client";
-    if (!folderMap.has(key)) folderMap.set(key, []);
+    if (!folderMap.has(key)) folderMap.set(key, { clientId: cId, role: clientRoleMap.get(cId) ?? null, catalogs: [] });
 
     type CommitEntry = { summary: string; adds: number; deletes: number; renames: number; styles: number; ts: string };
     type ChatHistory = { commits?: CommitEntry[] };
@@ -146,7 +149,7 @@ export async function GET() {
         ts: c.ts || row.updated_at,
       }));
 
-    folderMap.get(key)!.push({
+    folderMap.get(key)!.catalogs.push({
       id: row.id,
       name: row.name,
       industry: row.industry ?? null,
@@ -167,8 +170,8 @@ export async function GET() {
       if (b === "My Diagrams") return -1;
       return a.localeCompare(b);
     })
-    .forEach(([client_name, catalogs]) => {
-      folders.push({ client_name, catalogs });
+    .forEach(([client_name, group]) => {
+      folders.push({ client_id: group.clientId, client_name, role: group.role, catalogs: group.catalogs });
     });
 
   return NextResponse.json(folders);

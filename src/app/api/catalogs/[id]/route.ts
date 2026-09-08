@@ -86,8 +86,7 @@ export async function GET(
 
 /**
  * PATCH /api/catalogs/[id]
- * Body: { isBuiltin: boolean }
- * Promotes or demotes a catalog as a built-in system template.
+ * Body: { isBuiltin: boolean } or { name?: string, description?: string, industry?: string, clientId?: string | null }
  */
 export async function PATCH(
   request: NextRequest,
@@ -97,11 +96,71 @@ export async function PATCH(
     const { id } = params;
     const body = await request.json();
 
-    const clientName = body.isBuiltin === true ? "__builtin__" : null;
+    if (typeof body.isBuiltin === "boolean") {
+      const clientName = body.isBuiltin === true ? "__builtin__" : null;
+
+      const { error } = await supabaseAdmin
+        .from("capability_catalogs")
+        .update({ client_name: clientName })
+        .eq("id", id);
+
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+      return NextResponse.json({ ok: true });
+    }
+
+    const user = await getUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const { data: catalog } = await supabaseAdmin
+      .from("capability_catalogs")
+      .select("id, user_id, client_id")
+      .eq("id", id)
+      .single();
+
+    if (!catalog) return NextResponse.json({ error: "Catalog not found" }, { status: 404 });
+
+    const isOwner = catalog.user_id === user.id;
+    const sourceRole = catalog.client_id ? await getUserClientRole(catalog.client_id, user.id) : null;
+    const canEditCurrent = isOwner || sourceRole === "admin" || sourceRole === "editor";
+
+    if (!canEditCurrent) {
+      return NextResponse.json({ error: "Editor or Admin access required" }, { status: 403 });
+    }
+
+    const updates: Record<string, string | null> = {};
+    if (typeof body.name === "string") {
+      const name = body.name.trim();
+      if (!name) return NextResponse.json({ error: "Diagram name is required" }, { status: 400 });
+      updates.name = name;
+    }
+    if (typeof body.description === "string") updates.description = body.description.trim() || null;
+    if (typeof body.industry === "string") updates.industry = body.industry.trim() || null;
+
+    if (Object.prototype.hasOwnProperty.call(body, "clientId")) {
+      const targetClientId = typeof body.clientId === "string" && body.clientId.trim() ? body.clientId.trim() : null;
+
+      if (targetClientId) {
+        const targetRole = await getUserClientRole(targetClientId, user.id);
+        if (!targetRole || targetRole === "viewer") {
+          return NextResponse.json({ error: "Editor or Admin access required for target folder" }, { status: 403 });
+        }
+      } else if (!isOwner && sourceRole !== "admin") {
+        return NextResponse.json({ error: "Only the diagram owner or folder admin can remove it from a folder" }, { status: 403 });
+      }
+
+      updates.client_id = targetClientId;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
+    }
+
+    updates.updated_at = new Date().toISOString();
 
     const { error } = await supabaseAdmin
       .from("capability_catalogs")
-      .update({ client_name: clientName })
+      .update(updates)
       .eq("id", id);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

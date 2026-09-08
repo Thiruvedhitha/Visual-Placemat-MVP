@@ -34,9 +34,11 @@ const CLIENT_ACCENT: string[] = [
 
 // ── DiagramRow ────────────────────────────────────────────────────────────────
 
-function DiagramRow({ cat, canArchive, clientFolders = [], onArchived, onMoved }: {
+function DiagramRow({ cat, canEdit, canDelete, currentClientId = null, clientFolders = [], onArchived, onMoved }: {
   cat: ClientCatalog;
-  canArchive: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  currentClientId?: string | null;
   clientFolders?: Client[];
   onArchived?: () => void;
   onMoved?: () => void;
@@ -44,28 +46,55 @@ function DiagramRow({ cat, canArchive, clientFolders = [], onArchived, onMoved }
   const [historyOpen, setHistoryOpen] = useState(false);
   const [archiving, setArchiving]     = useState(false);
   const [moving, setMoving]           = useState(false);
+  const [renaming, setRenaming]       = useState(false);
   const commits = cat.recent_commits ?? [];
 
-  const moveToFolder = async (clientId: string) => {
-    if (!clientId || moving) return;
-    const target = clientFolders.find((folder) => folder.id === clientId);
-    if (!target) return;
-    if (!confirm(`Add "${cat.name}" to "${target.name}"?`)) return;
+  const renameDiagram = async () => {
+    if (renaming) return;
+    const name = prompt("Rename diagram", cat.name)?.trim();
+    if (!name || name === cat.name) return;
 
-    setMoving(true);
+    setRenaming(true);
     try {
-      const res = await fetch(`/api/clients/${encodeURIComponent(clientId)}/catalogs`, {
+      const res = await fetch(`/api/catalogs/${encodeURIComponent(cat.id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ catalogId: cat.id }),
+        body: JSON.stringify({ name }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? "Failed to add diagram to folder");
+        throw new Error(data.error ?? "Failed to rename diagram");
       }
       onMoved?.();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to add diagram to folder");
+      alert(err instanceof Error ? err.message : "Failed to rename diagram");
+    } finally {
+      setRenaming(false);
+    }
+  };
+
+  const moveToFolder = async (value: string) => {
+    if (!value || moving) return;
+    const targetClientId = value === "__my_diagrams__" ? null : value;
+    const target = targetClientId ? clientFolders.find((folder) => folder.id === targetClientId) : null;
+    const targetLabel = target?.name ?? "My Diagrams";
+    if (targetClientId === currentClientId) return;
+    if (!confirm(`${targetClientId ? "Move" : "Remove"} "${cat.name}" ${targetClientId ? `to "${targetLabel}"` : "from this folder"}?`)) return;
+
+    setMoving(true);
+    try {
+      const res = await fetch(`/api/catalogs/${encodeURIComponent(cat.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: targetClientId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Failed to move diagram");
+      }
+      onMoved?.();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to move diagram");
     } finally {
       setMoving(false);
     }
@@ -132,7 +161,17 @@ function DiagramRow({ cat, canArchive, clientFolders = [], onArchived, onMoved }
             </svg>
           </div>
         </Link>
-        {canArchive && (
+        {canEdit && (
+          <button
+            disabled={renaming}
+            onClick={(e) => { e.stopPropagation(); renameDiagram(); }}
+            className="ml-1 shrink-0 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-500 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50"
+            title="Rename diagram"
+          >
+            {renaming ? "Renaming..." : "Rename"}
+          </button>
+        )}
+        {canDelete && (
           <button
             disabled={archiving}
             onClick={async (e) => {
@@ -158,17 +197,18 @@ function DiagramRow({ cat, canArchive, clientFolders = [], onArchived, onMoved }
             <span>{archiving ? "Deleting..." : "Delete"}</span>
           </button>
         )}
-        {clientFolders.length > 0 && (
+        {canEdit && (clientFolders.length > 0 || currentClientId) && (
           <select
             disabled={moving}
             value=""
             onClick={(e) => e.stopPropagation()}
             onChange={(e) => moveToFolder(e.target.value)}
             className="ml-1 shrink-0 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-500 hover:border-brand-300 hover:text-brand-700 disabled:opacity-50"
-            title="Add diagram to folder"
+            title="Move diagram"
           >
-            <option value="">{moving ? "Adding..." : "Add to folder"}</option>
-            {clientFolders.map((folder) => (
+            <option value="">{moving ? "Moving..." : currentClientId ? "Move" : "Add to folder"}</option>
+            {currentClientId && <option value="__my_diagrams__">Remove from folder</option>}
+            {clientFolders.filter((folder) => folder.id !== currentClientId).map((folder) => (
               <option key={folder.id} value={folder.id}>{folder.name}</option>
             ))}
           </select>
@@ -216,14 +256,18 @@ function ClientAccordion({
   folder,
   accentColor,
   defaultOpen,
+  clientFolders,
   onRefresh,
 }: {
   folder: ClientFolder;
   accentColor: string;
   defaultOpen: boolean;
+  clientFolders: Client[];
   onRefresh: () => void;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const canEdit = folder.role === "admin" || folder.role === "editor";
+  const canDelete = folder.role === "admin";
 
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
@@ -262,7 +306,18 @@ function ClientAccordion({
           {folder.catalogs.length === 0 ? (
             <p className="px-4 py-3 text-xs text-slate-400">No diagrams in this client folder yet.</p>
           ) : (
-            folder.catalogs.map((cat) => <DiagramRow key={cat.id} cat={cat} canArchive onArchived={onRefresh} />)
+            folder.catalogs.map((cat) => (
+              <DiagramRow
+                key={cat.id}
+                cat={cat}
+                canEdit={canEdit}
+                canDelete={canDelete}
+                currentClientId={folder.client_id}
+                clientFolders={clientFolders}
+                onArchived={onRefresh}
+                onMoved={onRefresh}
+              />
+            ))
           )}
         </div>
       )}
@@ -319,7 +374,7 @@ function MyDiagramsSection({ catalogs, clientFolders, onRefresh }: { catalogs: C
           ) : (
             <div className="border-t border-slate-100 px-1 py-1">
               {catalogs.map((cat) => (
-                <DiagramRow key={cat.id} cat={cat} canArchive clientFolders={clientFolders} onArchived={onRefresh} onMoved={onRefresh} />
+                <DiagramRow key={cat.id} cat={cat} canEdit canDelete clientFolders={clientFolders} onArchived={onRefresh} onMoved={onRefresh} />
               ))}
             </div>
           )
@@ -422,6 +477,7 @@ export default function ClientFolders() {
                     folder={folder}
                     accentColor={CLIENT_ACCENT[idx % CLIENT_ACCENT.length]}
                     defaultOpen={false}
+                    clientFolders={availableClients}
                     onRefresh={fetchFolders}
                   />
                 ))}
