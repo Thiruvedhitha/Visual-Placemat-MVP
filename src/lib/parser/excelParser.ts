@@ -2,6 +2,7 @@ import * as XLSX from "xlsx";
 import type { ParsedCapabilityRow } from "@/types/capability";
 
 type RawCell = string | number | boolean | null | undefined;
+const DEFAULT_L0_NAME = "Blank";
 
 function cellText(value: RawCell): string | null {
   const text = value?.toString().trim() ?? "";
@@ -77,6 +78,11 @@ export function parseCapabilityCatalog(buffer: ArrayBuffer): ParsedCapabilityRow
   if (!hasLevelColumns) {
     const usedIndexes = new Set([colIndexes.level, colIndexes.desc].filter((i) => i >= 0));
     const nameIndex = findNameColumn(header, usedIndexes);
+    let rootLevel: 0 | 1 | 2 | 3 | null = null;
+    let insertedDefaultL0 = false;
+    const hasL0 = rawRows
+      .slice(1)
+      .some((row) => parseLevel((row as RawCell[])[colIndexes.level]) === 0);
     if (nameIndex === -1) {
       throw new Error("Could not find a capability name column. Expected 'Capability Name' or 'Name'.");
     }
@@ -92,7 +98,17 @@ export function parseCapabilityCatalog(buffer: ArrayBuffer): ParsedCapabilityRow
       if (level === null && !name) continue;
       if (level === null) throw new Error(`Invalid level in row ${i + 1}. Expected L0, L1, L2, or L3.`);
       if (!name) throw new Error(`Missing capability name in row ${i + 1}.`);
-      if (level > 0 && !currentNames[level - 1]) {
+
+      if (!hasL0 && !insertedDefaultL0 && level > 0) {
+        currentNames[0] = DEFAULT_L0_NAME;
+        rows.push({ l0: DEFAULT_L0_NAME, l1: null, l2: null, l3: null, description: null });
+        rootLevel = 0;
+        insertedDefaultL0 = true;
+      }
+
+      if (rootLevel === null) rootLevel = level;
+      if (level < rootLevel) rootLevel = level;
+      if (level > rootLevel && !currentNames[level - 1]) {
         throw new Error(`Missing parent before row ${i + 1}. L${level} rows must appear after their L${level - 1} parent.`);
       }
 

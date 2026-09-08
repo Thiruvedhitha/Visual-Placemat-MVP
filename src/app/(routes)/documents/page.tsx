@@ -367,7 +367,7 @@ export default function DocumentsUploadPage() {
                 ))}
               </div>
             </div>
-            <p className="mt-3 text-[11px] text-slate-400">Level accepts L0, L1, L2, or L3. Rows should be ordered parent first. Description is optional.</p>
+            <p className="mt-3 text-[11px] text-slate-400">Level accepts L0, L1, L2, or L3. If L0 is missing, a Blank L0 is created. Description is optional.</p>
           </div>
         )}
       </main>

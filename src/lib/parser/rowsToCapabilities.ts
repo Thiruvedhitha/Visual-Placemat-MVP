@@ -9,6 +9,8 @@ import type { Capability } from "@/types/capability";
  */
 
 let counter = 0;
+const DEFAULT_L0_NAME = "Blank";
+
 function tempId(): string {
   return `tmp_${Date.now()}_${++counter}`;
 }
@@ -73,6 +75,9 @@ export function convertRowsToCapabilities(
   if (lCols.length === 0 && levelCol) {
     const reserved = new Set([levelCol, ...(descCol ? [descCol] : [])]);
     const nameCol = findNameCol(headers, reserved);
+    let rootLevel: 0 | 1 | 2 | 3 | null = null;
+    let insertedDefaultL0 = false;
+    const hasL0 = rows.some((row) => parseLevel(row[levelCol]) === 0);
     if (!nameCol) return [];
 
     for (const [rowIndex, row] of rows.entries()) {
@@ -81,7 +86,33 @@ export function convertRowsToCapabilities(
       if (lvl === null && !value) continue;
       if (lvl === null) throw new Error(`Invalid level in row ${rowIndex + 2}. Expected L0, L1, L2, or L3.`);
       if (!value) throw new Error(`Missing capability name in row ${rowIndex + 2}.`);
-      if (lvl > 0 && !currentNames[lvl - 1]) {
+
+      if (!hasL0 && !insertedDefaultL0 && lvl > 0) {
+        const id = tempId();
+        const selfKey = `0:${DEFAULT_L0_NAME}`;
+        currentNames[0] = DEFAULT_L0_NAME;
+        pathToId.set(selfKey, id);
+        capabilities.push({
+          id,
+          catalog_id: catalogId ?? "unsaved",
+          parent_id: null,
+          level: 0,
+          name: DEFAULT_L0_NAME,
+          description: null,
+          note: null,
+          sort_order: sortOrder++,
+          source: "xlsx_import",
+          is_deleted: false,
+          created_at: now,
+          updated_at: now,
+        });
+        rootLevel = 0;
+        insertedDefaultL0 = true;
+      }
+
+      if (rootLevel === null) rootLevel = lvl;
+      if (lvl < rootLevel) rootLevel = lvl;
+      if (lvl > rootLevel && !currentNames[lvl - 1]) {
         throw new Error(`Missing parent before row ${rowIndex + 2}. L${lvl} rows must appear after their L${lvl - 1} parent.`);
       }
 
@@ -94,7 +125,7 @@ export function convertRowsToCapabilities(
       if (pathToId.has(selfKey)) continue;
 
       let parentId: string | null = null;
-      if (lvl > 0) {
+      if (lvl > rootLevel) {
         const parentParts = currentNames.slice(0, lvl).filter(Boolean);
         const parentKey = `${lvl - 1}:${parentParts.join("/")}`;
         parentId = pathToId.get(parentKey) ?? null;
