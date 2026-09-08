@@ -70,8 +70,8 @@ export default function DocumentsUploadPage() {
     const normalised = headers.map(h => h.trim().toUpperCase());
     const lCols = normalised.filter(h => /^L\d+/.test(h.replace(/\s.*/,"")));
     const hasLevel = normalised.some(h => h === "LEVEL");
-    const hasName = normalised.some(h => h === "CAPABILITY NAME" || h === "CAPABILITY" || h === "NAME" || h === "TITLE");
-    const hasDesc = normalised.some(h => h.includes("DESCRIPTION") || h.includes("DESC"));
+    const hasName = normalised.some(h => h === "CAPABILITY NAME" || h === "PROCESS NAME" || h === "CAPABILITY" || h === "NAME" || h === "TITLE");
+    const hasDesc = normalised.some(h => h.includes("DESCRIPTION") || h.includes("DESC") || h.includes("DEFINITION"));
     if (lCols.length === 0 && (!hasLevel || !hasName)) {
       setFormatValid(false);
       setFormatMessage("No hierarchy columns found. Use L0/L1/L2/L3 columns, or use Level + Capability Name columns.");

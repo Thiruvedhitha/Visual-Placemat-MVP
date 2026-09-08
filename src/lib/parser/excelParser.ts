@@ -15,12 +15,19 @@ function parseLevel(value: RawCell): 0 | 1 | 2 | 3 | null {
 }
 
 function findNameColumn(header: string[], usedIndexes: Set<number>): number {
-  const preferred = [/^capability\s*name$/i, /^capability$/i, /^name$/i, /^title$/i];
+  const preferred = [/^capability\s*name$/i, /^process\s*name$/i, /^capability$/i, /^name$/i, /^title$/i];
   for (const pattern of preferred) {
     const index = header.findIndex((h, i) => !usedIndexes.has(i) && pattern.test(String(h).trim()));
     if (index >= 0) return index;
   }
-  return header.findIndex((_, i) => !usedIndexes.has(i));
+  return header.findIndex((h, i) => {
+    const text = String(h).trim();
+    return !usedIndexes.has(i) && !/^(serial\s*no\.?|process\s*no\.?)$/i.test(text);
+  });
+}
+
+function findDescriptionColumn(header: string[]): number {
+  return header.findIndex((h) => /desc|definition/i.test(String(h)));
 }
 
 /**
@@ -53,7 +60,7 @@ export function parseCapabilityCatalog(buffer: ArrayBuffer): ParsedCapabilityRow
     l1: header.findIndex((h) => /l1/i.test(String(h))),
     l2: header.findIndex((h) => /l2/i.test(String(h))),
     l3: header.findIndex((h) => /l3/i.test(String(h))),
-    desc: header.findIndex((h) => /desc/i.test(String(h))),
+    desc: findDescriptionColumn(header),
     level: header.findIndex((h) => /^level$/i.test(String(h).trim())),
   };
 

@@ -36,19 +36,19 @@ function findLevelCol(headers: string[]): string | null {
 }
 
 function findNameCol(headers: string[], reserved: Set<string>): string | null {
-  const preferred = [/^capability\s*name$/i, /^capability$/i, /^name$/i, /^title$/i];
+  const preferred = [/^capability\s*name$/i, /^process\s*name$/i, /^capability$/i, /^name$/i, /^title$/i];
   for (const pattern of preferred) {
     const match = headers.find((h) => !reserved.has(h) && pattern.test(h.trim()));
     if (match) return match;
   }
-  return headers.find((h) => !reserved.has(h)) ?? null;
+  return headers.find((h) => !reserved.has(h) && !/^(serial\s*no\.?|process\s*no\.?)$/i.test(h.trim())) ?? null;
 }
 
 /**
  * Find the description column header (if any).
  */
 function findDescCol(headers: string[]): string | null {
-  return headers.find((h) => /desc/i.test(h)) ?? null;
+  return headers.find((h) => /desc|definition/i.test(h)) ?? null;
 }
 
 export function convertRowsToCapabilities(
