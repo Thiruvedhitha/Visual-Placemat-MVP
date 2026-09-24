@@ -18,6 +18,7 @@ export interface ClientCatalogItem {
   updated_at: string;
   capability_count: number;
   recent_commits: RecentCommit[];
+  tags: string[];
 }
 
 export interface ClientFolder {
@@ -44,7 +45,7 @@ export async function GET() {
   const { data, error } = await db
     .from("capability_catalogs")
     .select(
-      `id, name, client_name, client_id, industry, updated_at, chat_history,
+      `id, name, client_name, client_id, industry, updated_at, chat_history, tags,
        capabilities(count)`
     )
     .eq("user_id", user.id)
@@ -68,7 +69,7 @@ export async function GET() {
     const { data: cCatalogs } = await db
       .from("capability_catalogs")
       .select(
-        `id, name, client_name, client_id, industry, updated_at, chat_history,
+        `id, name, client_name, client_id, industry, updated_at, chat_history, tags,
          capabilities(count)`
       )
       .in("client_id", clientIds)
@@ -125,6 +126,7 @@ export async function GET() {
         (row.capabilities as unknown as { count: string }[])?.[0]?.count ?? 0
       ),
       recent_commits: recentCommits,
+      tags: ((row as Record<string, unknown>).tags as string[]) ?? [],
     });
   }
 
@@ -158,6 +160,7 @@ export async function GET() {
         (row.capabilities as unknown as { count: string }[])?.[0]?.count ?? 0
       ),
       recent_commits: recentCommits,
+      tags: ((row as Record<string, unknown>).tags as string[]) ?? [],
     });
   }
 

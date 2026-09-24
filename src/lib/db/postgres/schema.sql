@@ -15,6 +15,7 @@ CREATE TABLE public.capability_catalogs (
   chat_history jsonb DEFAULT '{"map": []}'::jsonb,
   client_id uuid,
   notes text,
+  tags text[] NOT NULL DEFAULT '{}',
   CONSTRAINT capability_catalogs_pkey PRIMARY KEY (id),
   CONSTRAINT capability_catalogs_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
   CONSTRAINT capability_catalogs_client_id_fkey FOREIGN KEY (client_id) REFERENCES public.clients(id)

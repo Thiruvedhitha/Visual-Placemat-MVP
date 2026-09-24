@@ -213,7 +213,8 @@ function normalizeSortOrders(capabilities: Capability[]): Capability[] {
 }
 
 /**
- * Get hierarchical number for a capability (e.g., "1.2.3.4")
+ * Get hierarchical number for a capability (e.g., "1.2.3").
+ * L0 nodes have no number (empty string); numbering starts at L1.
  */
 export function getCapabilityNumber(capId: string, capabilities: Capability[]): string {
   const byId = new Map(capabilities.map((c) => [c.id, c]));
@@ -224,11 +225,13 @@ export function getCapabilityNumber(capId: string, capabilities: Capability[]): 
     const parent: Capability | undefined = current.parent_id
       ? byId.get(current.parent_id)
       : undefined;
-    const parentId = parent?.id ?? null;
-    const siblings = capabilities.filter((c) => c.parent_id === parentId);
-    siblings.sort((a, b) => a.sort_order - b.sort_order);
-    const index = siblings.findIndex((c) => c.id === current!.id) + 1;
-    path.unshift(index);
+    if (current.level !== 0) {
+      const parentId = parent?.id ?? null;
+      const siblings = capabilities.filter((c) => c.parent_id === parentId);
+      siblings.sort((a, b) => a.sort_order - b.sort_order);
+      const index = siblings.findIndex((c) => c.id === current!.id) + 1;
+      path.unshift(index);
+    }
     current = parent;
   }
 

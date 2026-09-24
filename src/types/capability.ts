@@ -151,6 +151,7 @@ export interface ClientCatalog {
   updated_at: string;
   capability_count: number;
   recent_commits: RecentCommit[];
+  tags: string[];
 }
 
 export interface ClientFolder {

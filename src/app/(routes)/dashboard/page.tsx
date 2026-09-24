@@ -145,6 +145,138 @@ function MultiSelectColorPicker({
   );
 }
 
+// ── EditableDiagramName ──────────────────────────────────────────────────────
+// Click-to-edit diagram title shown in the header, replacing the old static
+// "Capability Canvas" label.
+function EditableDiagramName({
+  name,
+  canEdit,
+  onRename,
+}: {
+  name: string;
+  canEdit: boolean;
+  onRename: (name: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(name);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!editing) setDraft(name);
+  }, [name, editing]);
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing]);
+
+  const commit = () => {
+    const trimmed = draft.trim();
+    setEditing(false);
+    if (trimmed && trimmed !== name) onRename(trimmed);
+    else setDraft(name);
+  };
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") { setDraft(name); setEditing(false); }
+        }}
+        className="min-w-0 rounded border border-brand-400 px-1.5 py-0.5 text-sm font-medium text-slate-700 outline-none ring-1 ring-brand-300"
+      />
+    );
+  }
+
+  return (
+    <button
+      onClick={() => canEdit && setEditing(true)}
+      title={canEdit ? "Click to rename diagram" : undefined}
+      disabled={!canEdit}
+      className={`min-w-0 truncate text-sm font-medium text-slate-700 ${canEdit ? "hover:underline" : "cursor-default"}`}
+    >
+      {name || "Untitled diagram"}
+    </button>
+  );
+}
+
+// ── DiagramTagsBar ────────────────────────────────────────────────────────────
+// Chips denoting what the diagram represents (e.g. "Capability", "Process").
+// A diagram can carry several tags at once; each is removable via its × button.
+const DIAGRAM_TAG_OPTIONS = ["Capability", "Process"];
+
+function DiagramTagsBar({
+  tags,
+  canEdit,
+  onAdd,
+  onRemove,
+}: {
+  tags: string[];
+  canEdit: boolean;
+  onAdd: (tag: string) => void;
+  onRemove: (tag: string) => void;
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const available = DIAGRAM_TAG_OPTIONS.filter((t) => !tags.includes(t));
+
+  return (
+    <div className="flex shrink-0 items-center gap-1.5">
+      {tags.map((tag) => (
+        <span
+          key={tag}
+          className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-brand-200 bg-brand-50 px-2 py-1 text-xs font-semibold text-brand-700"
+        >
+          {tag}
+          {canEdit && (
+            <button
+              onClick={() => onRemove(tag)}
+              aria-label={`Remove ${tag} tag`}
+              className="text-brand-400 hover:text-brand-700"
+            >
+              <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </span>
+      ))}
+      {canEdit && available.length > 0 && (
+        <div className="relative shrink-0">
+          <button
+            onClick={() => setPickerOpen((v) => !v)}
+            className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-dashed border-slate-300 px-2 py-1 text-xs font-semibold text-slate-500 transition hover:border-brand-400 hover:text-brand-600"
+          >
+            + Tag
+          </button>
+          {pickerOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setPickerOpen(false)} />
+              <div className="absolute left-0 top-full z-20 mt-1 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                {available.map((tag) => (
+                  <button
+                    key={tag}
+                    onClick={() => { onAdd(tag); setPickerOpen(false); }}
+                    className="block w-full whitespace-nowrap px-3 py-1 text-left text-xs text-slate-700 hover:bg-slate-50"
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DashboardCanvasPage() {
   return (
     <Suspense
@@ -170,6 +302,9 @@ function DashboardContent() {
   const storeCapabilities = useCatalogStore((s) => s.capabilities) ?? [];
   const storeCatalogId = useCatalogStore((s) => s.catalogId);
   const catalogName = useCatalogStore((s) => s.catalogName);
+  const tags = useCatalogStore((s) => s.tags) ?? [];
+  const renameCatalogStore = useCatalogStore((s) => s.renameCatalog);
+  const setTagsStore = useCatalogStore((s) => s.setTags);
   const isDirty = useCatalogStore((s) => s.isDirty);
   const loadFromDB = useCatalogStore((s) => s.loadFromDB);
   const markSaved = useCatalogStore((s) => s.markSaved);
@@ -287,7 +422,7 @@ function DashboardContent() {
           setCapabilities(data.capabilities);
           setUndoStack([]);
           setRedoStack([]);
-          loadFromDB(catalogIdParam, data.catalog.name || catalogIdParam, data.capabilities);
+          loadFromDB(catalogIdParam, data.catalog.name || catalogIdParam, data.capabilities, data.catalog.tags ?? []);
           // Load saved node styles from DB
           if (data.catalog.node_styles && typeof data.catalog.node_styles === "object") {
             setNodeStyles(data.catalog.node_styles);
@@ -935,6 +1070,51 @@ function DashboardContent() {
     rebuildInteractiveNodes();
   }, [rebuildInteractiveNodes]);
 
+  // Rename diagram — persists immediately (independent of the versioned Apply/Save flow)
+  const handleRenameCatalog = useCallback(
+    async (newName: string) => {
+      renameCatalogStore(newName);
+      if (!storeCatalogId) return;
+      try {
+        const res = await fetch(`/api/catalogs/${storeCatalogId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: newName }),
+        });
+        if (!res.ok) throw new Error();
+      } catch {
+        showToast.error("Failed to rename diagram");
+      }
+    },
+    [storeCatalogId, renameCatalogStore]
+  );
+
+  // Tags — persists immediately (independent of the versioned Apply/Save flow)
+  const updateTags = useCallback(
+    async (nextTags: string[]) => {
+      setTagsStore(nextTags);
+      if (!storeCatalogId) return;
+      try {
+        const res = await fetch(`/api/catalogs/${storeCatalogId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tags: nextTags }),
+        });
+        if (!res.ok) throw new Error();
+      } catch {
+        showToast.error("Failed to save tags");
+      }
+    },
+    [storeCatalogId, setTagsStore]
+  );
+  const handleAddTag = useCallback((tag: string) => {
+    if (tags.includes(tag)) return;
+    updateTags([...tags, tag]);
+  }, [tags, updateTags]);
+  const handleRemoveTag = useCallback((tag: string) => {
+    updateTags(tags.filter((t) => t !== tag));
+  }, [tags, updateTags]);
+
   // Apply: bulk save to Supabase
   const handleApply = async () => {
     setApplying(true);
@@ -948,6 +1128,7 @@ function DashboardContent() {
           catalogName,
           capabilities,
           nodeStyles,
+          tags,
         }),
       });
       const data = await res.json();
@@ -1015,12 +1196,11 @@ function DashboardContent() {
             ← Home
           </Link>
           <span className="text-xs text-slate-400">|</span>
-          <span className="text-sm font-medium text-slate-700">
-            Capability Canvas
-          </span>
-          <span className="text-xs text-slate-400">
+          <EditableDiagramName name={catalogName} canEdit={canEdit} onRename={handleRenameCatalog} />
+          <span className="shrink-0 whitespace-nowrap text-xs text-slate-400">
             ({capabilities.length} capabilities)
           </span>
+          <DiagramTagsBar tags={tags} canEdit={canEdit} onAdd={handleAddTag} onRemove={handleRemoveTag} />
         </div>
 
         {/* Toolbar in header */}

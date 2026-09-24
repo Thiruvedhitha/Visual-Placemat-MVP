@@ -27,6 +27,8 @@ export interface CatalogState {
   /** null = never saved to DB */
   catalogId: string | null;
   catalogName: string;
+  /** Diagram tags, e.g. "Capability" / "Process" — a diagram can have several */
+  tags: string[];
   industry: string | null;
   capabilities: Capability[];
   isDirty: boolean;
@@ -47,10 +49,16 @@ export interface CatalogActions {
   ) => void;
 
   /** Load an existing catalog from DB (e.g. re-open) */
-  loadFromDB: (catalogId: string, name: string, capabilities: Capability[]) => void;
+  loadFromDB: (catalogId: string, name: string, capabilities: Capability[], tags?: string[]) => void;
 
   /** After Apply succeeds: store the real catalogId, clear dirty flag */
   markSaved: (catalogId: string) => void;
+
+  /** Rename the current diagram (persisted to DB by the caller) */
+  renameCatalog: (name: string) => void;
+
+  /** Replace the diagram's tags (persisted to DB by the caller) */
+  setTags: (tags: string[]) => void;
 
   /** Reset store (e.g. user starts over) */
   clear: () => void;
@@ -80,6 +88,7 @@ export interface CatalogActions {
 const initialState: CatalogState = {
   catalogId: null,
   catalogName: "",
+  tags: [],
   industry: null,
   capabilities: [],
   isDirty: false,
@@ -97,16 +106,18 @@ export const useCatalogStore = create<CatalogState & CatalogActions>()(
         set({
           catalogId: null,
           catalogName: name,
+          tags: [],
           industry,
           capabilities,
           styleCategories: [],
           isDirty: true,
         }),
 
-      loadFromDB: (catalogId, name, capabilities) =>
+      loadFromDB: (catalogId, name, capabilities, tags = []) =>
         set({
           catalogId,
           catalogName: name,
+          tags,
           capabilities,
           styleCategories: [],
           isDirty: false,
@@ -114,6 +125,10 @@ export const useCatalogStore = create<CatalogState & CatalogActions>()(
 
       markSaved: (catalogId) =>
         set({ catalogId, isDirty: false }),
+
+      renameCatalog: (name) => set({ catalogName: name }),
+
+      setTags: (tags) => set({ tags }),
 
       clear: () => set({ ...initialState }),
 
@@ -147,7 +162,7 @@ export const useCatalogStore = create<CatalogState & CatalogActions>()(
     }),
     {
       name: "visual-placemat-catalog",
-      version: 3,
+      version: 4,
       migrate: (persisted: unknown, version) => {
         // v1 → v2: clear pre-defined legend defaults so legend starts blank
         const state = persisted as Partial<CatalogState>;
@@ -155,6 +170,7 @@ export const useCatalogStore = create<CatalogState & CatalogActions>()(
           ...state,
           ...(version < 2 ? { legend: DEFAULT_LEGEND } : {}),
           styleCategories: state.styleCategories ?? [],
+          tags: state.tags ?? [],
         };
       },
     }

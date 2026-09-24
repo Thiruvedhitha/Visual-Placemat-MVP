@@ -126,16 +126,16 @@ export function buildCanvasNodes(
     sorted.filter((c) => !c.parent_id).forEach((c) => roots.push(nodeMap.get(c.id)!));
   }
 
-  // Assign hierarchical numbers
-  roots.forEach((root, ri) => {
-    root.number = String(ri + 1);
-    const assign = (parent: TreeNode) => {
+  // Assign hierarchical numbers — L0 has no number; L1 starts the sequence (1, 1.1, 1.1.1)
+  roots.forEach((root) => {
+    root.number = "";
+    const assign = (parent: TreeNode, parentIsRoot: boolean) => {
       parent.children.forEach((child, ci) => {
-        child.number = `${parent.number}.${ci + 1}`;
-        assign(child);
+        child.number = parentIsRoot ? String(ci + 1) : `${parent.number}.${ci + 1}`;
+        assign(child, false);
       });
     };
-    assign(root);
+    assign(root, true);
   });
 
   const nodes: Node<CapabilityNodeData>[] = [];

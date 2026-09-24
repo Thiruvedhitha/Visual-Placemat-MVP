@@ -61,6 +61,7 @@ export async function POST(request: NextRequest) {
           client_name: body.clientName || null,
           client_id: body.clientId || null,
           user_id: user?.id || null,
+          tags: Array.isArray(body.tags) ? body.tags : [],
         })
         .select("id")
         .single();

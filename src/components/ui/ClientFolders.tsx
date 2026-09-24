@@ -102,117 +102,129 @@ function DiagramRow({ cat, canEdit, canDelete, currentClientId = null, clientFol
 
   return (
     <div>
-      <div className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all hover:bg-slate-50">
-        {/* History toggle */}
-        {commits.length > 0 ? (
-          <button
-            onClick={(e) => { e.preventDefault(); setHistoryOpen((v) => !v); }}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-400 transition hover:bg-slate-200"
-          >
-            <svg
-              className={`h-3.5 w-3.5 transition-transform duration-200 ${historyOpen ? "rotate-90" : ""}`}
-              fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"
+      <div className="flex flex-col gap-2 rounded-lg px-3 py-2.5 transition-all hover:bg-slate-50 sm:flex-row sm:items-center sm:gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          {/* History toggle */}
+          {commits.length > 0 ? (
+            <button
+              onClick={(e) => { e.preventDefault(); setHistoryOpen((v) => !v); }}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-400 transition hover:bg-slate-200"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-            </svg>
-          </button>
-        ) : (
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-400">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0112 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375z" />
-            </svg>
-          </span>
-        )}
+              <svg
+                className={`h-3.5 w-3.5 transition-transform duration-200 ${historyOpen ? "rotate-90" : ""}`}
+                fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+              </svg>
+            </button>
+          ) : (
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-400">
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0112 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375z" />
+              </svg>
+            </span>
+          )}
 
-        {/* Name + meta — clicking goes to dashboard */}
-        <Link
-          href={`/dashboard?catalogId=${encodeURIComponent(cat.id)}`}
-          className="group flex min-w-0 flex-1 items-center gap-3"
-        >
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-slate-800 group-hover:text-brand-700">
-              {cat.name}
-            </p>
-            <div className="mt-0.5 flex items-center gap-2">
-              {cat.industry && (
-                <span className="rounded-full bg-slate-100 px-1.5 py-px text-[10px] font-medium text-slate-500">
-                  {cat.industry}
-                </span>
-              )}
-              <span className="text-[10px] text-slate-400">
-                {cat.capability_count} capabilities
-              </span>
-              {commits.length > 0 && (
+          {/* Name + meta — clicking goes to dashboard */}
+          <Link
+            href={`/dashboard?catalogId=${encodeURIComponent(cat.id)}`}
+            className="group flex min-w-0 flex-1 items-center gap-3"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-slate-800 group-hover:text-brand-700">
+                {cat.name}
+              </p>
+              <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                {cat.industry && (
+                  <span className="rounded-full bg-slate-100 px-1.5 py-px text-[10px] font-medium text-slate-500">
+                    {cat.industry}
+                  </span>
+                )}
+                {(cat.tags ?? []).map((tag) => (
+                  <span key={tag} className="rounded-full border border-brand-200 bg-brand-50 px-1.5 py-px text-[10px] font-medium text-brand-700">
+                    {tag}
+                  </span>
+                ))}
                 <span className="text-[10px] text-slate-400">
-                  · {commits.length} change{commits.length !== 1 ? "s" : ""}
+                  {cat.capability_count} capabilities
                 </span>
-              )}
+                {commits.length > 0 && (
+                  <span className="text-[10px] text-slate-400">
+                    · {commits.length} change{commits.length !== 1 ? "s" : ""}
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
 
-          {/* Time + arrow */}
-          <div className="flex shrink-0 items-center gap-2">
-            <span className="text-[10px] text-slate-400">{timeAgo(cat.updated_at)}</span>
-            <svg
-              className="h-3.5 w-3.5 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-brand-400"
-              fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"
+            {/* Time + arrow */}
+            <div className="hidden shrink-0 items-center gap-2 sm:flex">
+              <span className="text-[10px] text-slate-400">{timeAgo(cat.updated_at)}</span>
+              <svg
+                className="h-3.5 w-3.5 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-brand-400"
+                fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+              </svg>
+            </div>
+          </Link>
+        </div>
+
+        {/* Actions — wrap onto their own row on narrow screens */}
+        <div className="flex flex-wrap items-center gap-1.5 pl-11 sm:shrink-0 sm:flex-nowrap sm:pl-0">
+          <span className="text-[10px] text-slate-400 sm:hidden">{timeAgo(cat.updated_at)}</span>
+          {canEdit && (
+            <button
+              disabled={renaming}
+              onClick={(e) => { e.stopPropagation(); renameDiagram(); }}
+              className="shrink-0 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-500 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50"
+              title="Rename diagram"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-            </svg>
-          </div>
-        </Link>
-        {canEdit && (
-          <button
-            disabled={renaming}
-            onClick={(e) => { e.stopPropagation(); renameDiagram(); }}
-            className="ml-1 shrink-0 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-500 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50"
-            title="Rename diagram"
-          >
-            {renaming ? "Renaming..." : "Rename"}
-          </button>
-        )}
-        {canDelete && (
-          <button
-            disabled={archiving}
-            onClick={async (e) => {
-              e.stopPropagation();
-              if (!confirm(`Delete "${cat.name}"? It will be hidden from My Works and can be restored by an admin.`)) return;
-              setArchiving(true);
-              try {
-                const res = await fetch(`/api/catalogs/${cat.id}/archive`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
-                if (!res.ok) {
-                  const data = await res.json().catch(() => ({}));
-                  throw new Error(data.error ?? "Failed to delete diagram");
+              {renaming ? "Renaming..." : "Rename"}
+            </button>
+          )}
+          {canDelete && (
+            <button
+              disabled={archiving}
+              onClick={async (e) => {
+                e.stopPropagation();
+                if (!confirm(`Delete "${cat.name}"? It will be hidden from My Works and can be restored by an admin.`)) return;
+                setArchiving(true);
+                try {
+                  const res = await fetch(`/api/catalogs/${cat.id}/archive`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+                  if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error(data.error ?? "Failed to delete diagram");
+                  }
+                  onArchived?.();
+                } catch (err) {
+                  alert(err instanceof Error ? err.message : "Failed to delete diagram");
+                } finally {
+                  setArchiving(false);
                 }
-                onArchived?.();
-              } catch (err) {
-                alert(err instanceof Error ? err.message : "Failed to delete diagram");
-              } finally {
-                setArchiving(false);
-              }
-            }}
-            className="ml-1 shrink-0 rounded-md border border-red-100 px-2 py-1 text-xs font-semibold text-red-500 hover:border-red-200 hover:bg-red-50 disabled:opacity-50"
-            title="Delete diagram"
-          >
-            <span>{archiving ? "Deleting..." : "Delete"}</span>
-          </button>
-        )}
-        {canEdit && (clientFolders.length > 0 || currentClientId) && (
-          <select
-            disabled={moving}
-            value=""
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => moveToFolder(e.target.value)}
-            className="ml-1 shrink-0 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-500 hover:border-brand-300 hover:text-brand-700 disabled:opacity-50"
-            title="Move diagram"
-          >
-            <option value="">{moving ? "Moving..." : currentClientId ? "Move" : "Add to folder"}</option>
-            {currentClientId && <option value="__my_diagrams__">Remove from folder</option>}
-            {clientFolders.filter((folder) => folder.id !== currentClientId).map((folder) => (
-              <option key={folder.id} value={folder.id}>{folder.name}</option>
-            ))}
-          </select>
-        )}
+              }}
+              className="shrink-0 rounded-md border border-red-100 px-2 py-1 text-xs font-semibold text-red-500 hover:border-red-200 hover:bg-red-50 disabled:opacity-50"
+              title="Delete diagram"
+            >
+              <span>{archiving ? "Deleting..." : "Delete"}</span>
+            </button>
+          )}
+          {canEdit && (clientFolders.length > 0 || currentClientId) && (
+            <select
+              disabled={moving}
+              value=""
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => moveToFolder(e.target.value)}
+              className="shrink-0 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-500 hover:border-brand-300 hover:text-brand-700 disabled:opacity-50"
+              title="Move diagram"
+            >
+              <option value="">{moving ? "Moving..." : currentClientId ? "Move" : "Add to folder"}</option>
+              {currentClientId && <option value="__my_diagrams__">Remove from folder</option>}
+              {clientFolders.filter((folder) => folder.id !== currentClientId).map((folder) => (
+                <option key={folder.id} value={folder.id}>{folder.name}</option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
       {/* Expandable commit history — VS Code source-control style */}

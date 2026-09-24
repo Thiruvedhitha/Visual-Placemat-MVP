@@ -93,7 +93,7 @@ function CapabilityNode({ data, id, selected }: NodeProps<CapabilityNodeData>) {
             textShadow: "0 1px 2px rgba(0,0,0,0.2)",
           }}
         >
-          {data.number} {data.label}
+          {data.number ? `${data.number} ` : ""}{data.label}
         </span>
         <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
       </div>

@@ -297,6 +297,7 @@ ${tree}`;
 /**
  * Computes the canonical hierarchical number for a capability (e.g. "1.7.5.1")
  * using the FULL capability list so positions match what the canvas displays.
+ * L0 nodes have no number (empty string); numbering starts at L1.
  */
 function getNumber(capId: string, allCaps: Capability[]): string {
   const byId = new Map(allCaps.map((c) => [c.id, c]));
@@ -304,9 +305,11 @@ function getNumber(capId: string, allCaps: Capability[]): string {
   let current = byId.get(capId);
   while (current) {
     const parentId = current.parent_id ?? null;
-    const siblings = allCaps.filter((c) => (c.parent_id ?? null) === parentId);
-    siblings.sort((a, b) => a.sort_order - b.sort_order);
-    path.unshift(siblings.findIndex((c) => c.id === current!.id) + 1);
+    if (current.level !== 0) {
+      const siblings = allCaps.filter((c) => (c.parent_id ?? null) === parentId);
+      siblings.sort((a, b) => a.sort_order - b.sort_order);
+      path.unshift(siblings.findIndex((c) => c.id === current!.id) + 1);
+    }
     current = current.parent_id ? byId.get(current.parent_id) : undefined;
   }
   return path.join(".");

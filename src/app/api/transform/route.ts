@@ -35,6 +35,7 @@ export async function GET() {
 /**
  * Computes the canonical hierarchical number for a capability (e.g. "1.7.5.1")
  * using sort_order — must stay in sync with promptBuilder.getNumber and the canvas.
+ * L0 nodes have no number (empty string); numbering starts at L1.
  */
 function getCapabilityNumber(capId: string, caps: Capability[]): string {
   const byId = new Map(caps.map((c) => [c.id, c]));
@@ -42,9 +43,11 @@ function getCapabilityNumber(capId: string, caps: Capability[]): string {
   let current = byId.get(capId);
   while (current) {
     const parentId = current.parent_id ?? null;
-    const siblings = caps.filter((c) => (c.parent_id ?? null) === parentId);
-    siblings.sort((a, b) => a.sort_order - b.sort_order);
-    path.unshift(siblings.findIndex((c) => c.id === current!.id) + 1);
+    if (current.level !== 0) {
+      const siblings = caps.filter((c) => (c.parent_id ?? null) === parentId);
+      siblings.sort((a, b) => a.sort_order - b.sort_order);
+      path.unshift(siblings.findIndex((c) => c.id === current!.id) + 1);
+    }
     current = current.parent_id ? byId.get(current.parent_id) : undefined;
   }
   return path.join(".");
@@ -57,7 +60,7 @@ function getCapabilityNumber(capId: string, caps: Capability[]): string {
  *
  * Strategy:
  * - Always send all L0 + L1 (structure overview)
- * - If the prompt contains hierarchical numbers (e.g. 1.6.1.1), resolve those
+ * - If the prompt contains hierarchical numbers (e.g. 1.6.1), resolve those
  *   nodes and force-include them plus all their ancestors and siblings
  * - L2: only nodes whose name matches a keyword from the user's request
  * - L3: only direct children of matched L2s  (no sibling expansion — saves tokens)
@@ -87,8 +90,8 @@ function trimCapabilities(caps: Capability[], fullPrompt: string): Capability[] 
     return caps.filter((c) => c.level <= maxLevel);
   }
 
-  // Detect hierarchical number references in the prompt (e.g. "1.6.1.1", "2.3")
-  const numberRefs = [...lower.matchAll(/\b(\d+(?:\.\d+){1,3})\b/g)].map((m) => m[1]);
+  // Detect hierarchical number references in the prompt (e.g. "1", "1.6", "1.6.1")
+  const numberRefs = [...lower.matchAll(/\b(\d+(?:\.\d+){0,2})\b/g)].map((m) => m[1]);
   if (numberRefs.length > 0) {
     // Build number→id map for all caps (computed once)
     const numberMap = new Map<string, string>();

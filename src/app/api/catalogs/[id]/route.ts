@@ -24,7 +24,7 @@ export async function GET(
     // Fetch catalog metadata (include client_id for role lookup)
     const { data: catalog, error: catError } = await supabaseAdmin
       .from("capability_catalogs")
-      .select("id, name, industry, created_at, node_styles, chat_history, client_id")
+      .select("id, name, industry, created_at, node_styles, chat_history, client_id, tags")
       .eq("id", catalogId)
       .single();
 
@@ -86,7 +86,7 @@ export async function GET(
 
 /**
  * PATCH /api/catalogs/[id]
- * Body: { isBuiltin: boolean } or { name?: string, description?: string, industry?: string, clientId?: string | null }
+ * Body: { isBuiltin: boolean } or { name?: string, description?: string, industry?: string, clientId?: string | null, tags?: string[] }
  */
 export async function PATCH(
   request: NextRequest,
@@ -128,7 +128,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Editor or Admin access required" }, { status: 403 });
     }
 
-    const updates: Record<string, string | null> = {};
+    const updates: Record<string, string | string[] | null> = {};
     if (typeof body.name === "string") {
       const name = body.name.trim();
       if (!name) return NextResponse.json({ error: "Diagram name is required" }, { status: 400 });
@@ -136,6 +136,13 @@ export async function PATCH(
     }
     if (typeof body.description === "string") updates.description = body.description.trim() || null;
     if (typeof body.industry === "string") updates.industry = body.industry.trim() || null;
+    if (Array.isArray(body.tags)) {
+      if (!body.tags.every((t: unknown) => typeof t === "string")) {
+        return NextResponse.json({ error: "tags must be an array of strings" }, { status: 400 });
+      }
+      const cleaned: string[] = body.tags.map((t: string) => t.trim()).filter(Boolean);
+      updates.tags = Array.from(new Set(cleaned));
+    }
 
     if (Object.prototype.hasOwnProperty.call(body, "clientId")) {
       const targetClientId = typeof body.clientId === "string" && body.clientId.trim() ? body.clientId.trim() : null;

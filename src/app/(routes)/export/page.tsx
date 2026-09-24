@@ -17,6 +17,12 @@ import { showToast } from "@/components/ui/Toast";
 
 const NODE_TYPES = { capability: CapabilityNode };
 const ALL_LEVELS = new Set([0, 1, 2, 3]);
+const LEVEL_OPTIONS: { level: number; label: string }[] = [
+  { level: 0, label: "Level 0" },
+  { level: 1, label: "Level 1" },
+  { level: 2, label: "Level 2" },
+  { level: 3, label: "Level 3" },
+];
 
 type ExportOption = {
   title: string;
@@ -140,10 +146,23 @@ function ExportContent() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [exporting, setExporting] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
+  const [selectedLevels, setSelectedLevels] = useState<Set<number>>(() => new Set([0, 1, 2, 3]));
+
+  const activeLevels = selectedLevels.size > 0 ? selectedLevels : ALL_LEVELS;
+  const sortedActiveLevels = [...activeLevels].sort((a, b) => a - b);
+
+  const toggleLevel = useCallback((level: number) => {
+    setSelectedLevels((prev) => {
+      const next = new Set(prev);
+      if (next.has(level)) next.delete(level);
+      else next.add(level);
+      return next;
+    });
+  }, []);
 
   // Build nodes from store and apply persisted nodeStyles
   const categoryStyles = resolveCapabilityCategoryStyles(capabilities, styleCategories);
-  const nodes = buildCanvasNodes(capabilities, ALL_LEVELS).map((n) => {
+  const nodes = buildCanvasNodes(capabilities, activeLevels).map((n) => {
     const styles = { ...(categoryStyles[n.id] ?? {}), ...(nodeStyles[n.id] ?? {}) };
     if (styles) {
       return {
@@ -312,58 +331,89 @@ function ExportContent() {
 
         pdf.save(`${baseName}.pdf`);
       } else if (format === "json") {
-        const json = JSON.stringify(capabilities, null, 2);
+        const filtered = capabilities.filter((c) => activeLevels.has(c.level));
+        const json = JSON.stringify(filtered, null, 2);
         const blob = new Blob([json], { type: "application/json" });
         saveAs(blob, `${baseName}.json`);
       } else if (format === "csv" || format === "xlsx") {
-        // Build hierarchical rows — show parent names only on first occurrence
-        const l0s = capabilities.filter((c) => c.level === 0).sort((a, b) => a.sort_order - b.sort_order);
+        // Build hierarchical rows over the selected levels only. Levels not
+        // selected are skipped entirely (both their column and their rows).
+        const levels = sortedActiveLevels.length > 0 ? sortedActiveLevels : [0, 1, 2, 3];
 
-        const rows: { l0: string; l1: string; l2: string; l3: string; description: string }[] = [];
-
-        for (const l0 of l0s) {
-          let l0Shown = false;
-          const l1s = capabilities.filter((c) => c.level === 1 && c.parent_id === l0.id).sort((a, b) => a.sort_order - b.sort_order);
-          if (l1s.length === 0) {
-            rows.push({ l0: l0.name, l1: "", l2: "", l3: "", description: l0.description || "" });
-            continue;
-          }
-          for (const l1 of l1s) {
-            let l1Shown = false;
-            const l2s = capabilities.filter((c) => c.level === 2 && c.parent_id === l1.id).sort((a, b) => a.sort_order - b.sort_order);
-            if (l2s.length === 0) {
-              rows.push({ l0: l0Shown ? "" : l0.name, l1: l1.name, l2: "", l3: "", description: l1.description || "" });
-              l0Shown = true;
-              continue;
-            }
-            for (const l2 of l2s) {
-              let l2Shown = false;
-              const l3s = capabilities.filter((c) => c.level === 3 && c.parent_id === l2.id).sort((a, b) => a.sort_order - b.sort_order);
-              if (l3s.length === 0) {
-                rows.push({ l0: l0Shown ? "" : l0.name, l1: l1Shown ? "" : l1.name, l2: l2.name, l3: "", description: l2.description || "" });
-                l0Shown = true;
-                l1Shown = true;
-                continue;
-              }
-              for (const l3 of l3s) {
-                rows.push({
-                  l0: l0Shown ? "" : l0.name,
-                  l1: l1Shown ? "" : l1.name,
-                  l2: l2Shown ? "" : l2.name,
-                  l3: l3.name,
-                  description: l3.description || "",
-                });
-                l0Shown = true;
-                l1Shown = true;
-                l2Shown = true;
-              }
-            }
-          }
+        // Index children by parent for fast descendant lookup
+        const childrenByParent = new Map<string, typeof capabilities>();
+        for (const c of capabilities) {
+          if (!c.parent_id) continue;
+          const list = childrenByParent.get(c.parent_id);
+          if (list) list.push(c);
+          else childrenByParent.set(c.parent_id, [c]);
         }
 
+        // Collect descendants of `parentId` whose level === targetLevel,
+        // walking through any intermediate (unselected) levels.
+        const descendantsAtLevel = (parentId: string, targetLevel: number) => {
+          const out: typeof capabilities = [];
+          const stack: string[] = [parentId];
+          while (stack.length) {
+            const id = stack.pop()!;
+            const kids = childrenByParent.get(id) ?? [];
+            for (const k of kids) {
+              if (k.level === targetLevel) out.push(k);
+              else if (k.level < targetLevel) stack.push(k.id);
+            }
+          }
+          return out.sort((a, b) => a.sort_order - b.sort_order);
+        };
+
+        type Row = Record<string, string>;
+        const colKey = (lvl: number) => `l${lvl}`;
+        const emptyRow = (): Row => {
+          const r: Row = { description: "" };
+          for (const lvl of levels) r[colKey(lvl)] = "";
+          return r;
+        };
+
+        const rows: Row[] = [];
+        const walk = (cap: (typeof capabilities)[number], levelIdx: number, inherited: Row) => {
+          const currentRow = { ...inherited, [colKey(cap.level)]: cap.name, description: cap.description || "" };
+          const nextLevel = levels[levelIdx + 1];
+          if (nextLevel === undefined) {
+            rows.push(currentRow);
+            return;
+          }
+          const kids = descendantsAtLevel(cap.id, nextLevel);
+          if (kids.length === 0) {
+            rows.push(currentRow);
+            return;
+          }
+          kids.forEach((kid, ki) => {
+            // Only the first child inherits the parent's name in its columns;
+            // subsequent children get blanks in ancestor columns so the sheet
+            // reads like an outline rather than repeating values.
+            const rowForChild = ki === 0 ? currentRow : { ...currentRow, [colKey(cap.level)]: "" };
+            // Also blank out any higher ancestor columns for subsequent children.
+            if (ki > 0) {
+              for (const lvl of levels) {
+                if (lvl < cap.level) rowForChild[colKey(lvl)] = "";
+              }
+            }
+            walk(kid, levelIdx + 1, rowForChild);
+          });
+        };
+
+        const topLevel = levels[0];
+        const topCaps = capabilities
+          .filter((c) => c.level === topLevel)
+          .sort((a, b) => a.sort_order - b.sort_order);
+        for (const cap of topCaps) walk(cap, 0, emptyRow());
+
+        const header = [
+          ...levels.map((lvl) => `L${lvl} Capability Name`),
+          "Description",
+        ];
         const sheetData = [
-          ["L0 Capability Name", "L1 Capability Name", "L2 Capability Name", "L3 Capability Name", "Description"],
-          ...rows.map((r) => [r.l0, r.l1, r.l2, r.l3, r.description]),
+          header,
+          ...rows.map((r) => [...levels.map((lvl) => r[colKey(lvl)] ?? ""), r.description ?? ""]),
         ];
 
         if (format === "csv") {
@@ -375,13 +425,9 @@ function ExportContent() {
           saveAs(blob, `${baseName}.csv`);
         } else {
           const ws = XLSX.utils.aoa_to_sheet(sheetData);
-          // Set column widths
           ws["!cols"] = [
-            { wch: 30 }, // L0
-            { wch: 30 }, // L1
-            { wch: 30 }, // L2
-            { wch: 30 }, // L3
-            { wch: 50 }, // Description
+            ...levels.map(() => ({ wch: 30 })),
+            { wch: 50 },
           ];
           const wb = XLSX.utils.book_new();
           XLSX.utils.book_append_sheet(wb, ws, "Capability Catalog");
@@ -396,7 +442,7 @@ function ExportContent() {
     } finally {
       setExporting(null);
     }
-  }, [capabilities, catalogName, storeCatalogId, catalogId, getBounds]);
+  }, [capabilities, catalogName, storeCatalogId, catalogId, getBounds, activeLevels, sortedActiveLevels]);
 
   const { width: canvasW, height: canvasH } = getBounds();
 
@@ -461,6 +507,51 @@ function ExportContent() {
           </div>
 
           <div className="space-y-8 px-6 py-8 sm:px-10">
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900">Levels to Include</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Pick which capability levels appear in every export below (visuals, data, and shared links use the same selection).
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {LEVEL_OPTIONS.map((opt) => {
+                    const checked = selectedLevels.has(opt.level);
+                    return (
+                      <label
+                        key={opt.level}
+                        className={`inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                          checked
+                            ? "border-brand-400 bg-brand-50 text-brand-700"
+                            : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 accent-brand-600"
+                          checked={checked}
+                          onChange={() => toggleLevel(opt.level)}
+                        />
+                        {opt.label}
+                      </label>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedLevels(new Set([0, 1, 2, 3]))}
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+              {selectedLevels.size === 0 && (
+                <p className="mt-3 text-xs font-medium text-amber-600">
+                  No levels selected — exports will default to including all levels.
+                </p>
+              )}
+            </section>
             {EXPORT_SECTIONS.map((section) => (
               <section key={section.title} className="rounded-2xl border border-slate-200 bg-slate-50/50 p-5 sm:p-6">
                 <div className="mb-4">
