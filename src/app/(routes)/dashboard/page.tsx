@@ -31,7 +31,7 @@ import { buildCanvasNodes } from "@/lib/canvas/layoutEngine";
 import { handleNodeDragDrop } from "@/lib/canvas/dragDropHandler";
 import { executeCommands } from "@/lib/commands/executor";
 import type { DiagramCommand, NodeStylePatch } from "@/lib/commands/index";
-import type { Capability } from "@/types/capability";
+import type { Capability, ClientFolder } from "@/types/capability";
 import { useCatalogStore } from "@/stores/catalogStore";
 import type { LegendEntry } from "@/stores/catalogStore";
 
@@ -208,37 +208,39 @@ function EditableDiagramName({
 }
 
 // ── DiagramTagsBar ────────────────────────────────────────────────────────────
-// Chips denoting what the diagram represents (e.g. "Capability", "Process").
-// A diagram can carry several tags at once; each is removable via its × button.
+// A diagram carries at most one category tag (e.g. "Capability" or "Process").
+// Selecting a different option replaces the current tag rather than adding to it.
 const DIAGRAM_TAG_OPTIONS = ["Capability", "Process"];
 
 function DiagramTagsBar({
-  tags,
+  tag,
   canEdit,
-  onAdd,
-  onRemove,
+  onSelect,
+  onClear,
 }: {
-  tags: string[];
+  tag: string | null;
   canEdit: boolean;
-  onAdd: (tag: string) => void;
-  onRemove: (tag: string) => void;
+  onSelect: (tag: string) => void;
+  onClear: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
-  const available = DIAGRAM_TAG_OPTIONS.filter((t) => !tags.includes(t));
 
   return (
-    <div className="flex shrink-0 items-center gap-1.5">
-      {tags.map((tag) => (
-        <span
-          key={tag}
-          className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-brand-200 bg-brand-50 px-2 py-1 text-xs font-semibold text-brand-700"
-        >
-          {tag}
+    <div className="relative flex shrink-0 items-center gap-1.5">
+      {tag ? (
+        <span className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-brand-200 bg-brand-50 px-2 py-1 text-xs font-semibold text-brand-700">
+          <button
+            onClick={() => canEdit && setPickerOpen((v) => !v)}
+            disabled={!canEdit}
+            className={canEdit ? "transition-colors hover:text-brand-900" : ""}
+          >
+            {tag}
+          </button>
           {canEdit && (
             <button
-              onClick={() => onRemove(tag)}
+              onClick={onClear}
               aria-label={`Remove ${tag} tag`}
-              className="text-brand-400 hover:text-brand-700"
+              className="text-brand-400 transition-colors hover:text-brand-700"
             >
               <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -246,32 +248,33 @@ function DiagramTagsBar({
             </button>
           )}
         </span>
-      ))}
-      {canEdit && available.length > 0 && (
-        <div className="relative shrink-0">
+      ) : (
+        canEdit && (
           <button
             onClick={() => setPickerOpen((v) => !v)}
-            className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-dashed border-slate-300 px-2 py-1 text-xs font-semibold text-slate-500 transition hover:border-brand-400 hover:text-brand-600"
+            className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-dashed border-slate-300 px-2 py-1 text-xs font-semibold text-slate-500 transition-colors hover:border-brand-400 hover:text-brand-600"
           >
             + Tag
           </button>
-          {pickerOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setPickerOpen(false)} />
-              <div className="absolute left-0 top-full z-20 mt-1 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-                {available.map((tag) => (
-                  <button
-                    key={tag}
-                    onClick={() => { onAdd(tag); setPickerOpen(false); }}
-                    className="block w-full whitespace-nowrap px-3 py-1 text-left text-xs text-slate-700 hover:bg-slate-50"
-                  >
-                    {tag}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
+        )
+      )}
+      {canEdit && pickerOpen && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setPickerOpen(false)} />
+          <div className="absolute left-0 top-full z-20 mt-1 w-32 origin-top-left animate-dropdown-in rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+            {DIAGRAM_TAG_OPTIONS.map((option) => (
+              <button
+                key={option}
+                onClick={() => { onSelect(option); setPickerOpen(false); }}
+                className={`block w-full whitespace-nowrap px-3 py-1.5 text-left text-xs transition-all duration-150 hover:translate-x-0.5 hover:bg-brand-50 hover:text-brand-700 ${
+                  option === tag ? "font-semibold text-brand-600" : "text-slate-700"
+                }`}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
@@ -303,6 +306,7 @@ function DashboardContent() {
   const storeCatalogId = useCatalogStore((s) => s.catalogId);
   const catalogName = useCatalogStore((s) => s.catalogName);
   const tags = useCatalogStore((s) => s.tags) ?? [];
+  const legend = useCatalogStore((s) => s.legend);
   const renameCatalogStore = useCatalogStore((s) => s.renameCatalog);
   const setTagsStore = useCatalogStore((s) => s.setTags);
   const isDirty = useCatalogStore((s) => s.isDirty);
@@ -317,6 +321,10 @@ function DashboardContent() {
   const [applyError, setApplyError] = useState<string | null>(null);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [useTemplateOpen, setUseTemplateOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<"editor" | "present">("editor");
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [presentationPanel, setPresentationPanel] = useState<"levels" | "legend" | null>(null);
+  const [clientName, setClientName] = useState<string | null>(null);
 
   // Role-based access: null means unknown / not loaded yet; treat as read-only for safety
   const [userRole, setUserRole] = useState<"admin" | "editor" | "viewer" | null>(null);
@@ -332,6 +340,7 @@ function DashboardContent() {
   const capabilitiesRef = useRef<Capability[]>([]);
   const nodeStylesRef = useRef<Record<string, NodeStylePatch>>({});
   const canEditRef = useRef(false);
+  const viewModeRef = useRef<"editor" | "present">("editor");
   // Debounce refs for text/color changes — captures "before" snapshot, pushes after idle
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const debounceSnapshotRef = useRef<UndoSnapshot | null>(null);
@@ -341,6 +350,7 @@ function DashboardContent() {
   redoStackRef.current = redoStack;
   capabilitiesRef.current = capabilities;
   canEditRef.current = canEdit;
+  viewModeRef.current = viewMode;
 
   // Canvas state
   const [nodes, setNodes] = useState<Node<CapabilityNodeData>[]>([]);
@@ -349,7 +359,6 @@ function DashboardContent() {
   const [visibleLevels, setVisibleLevels] = useState<Set<number>>(
     new Set([0, 1, 2, 3])
   );
-  const [interactionMode, setInteractionMode] = useState<"select" | "pan">("select");
   const [addNodeOpen, setAddNodeOpen] = useState(false);
   const [nodeStyles, setNodeStylesLocal] = useState<Record<string, NodeStylePatch>>(
     () => useCatalogStore.getState().nodeStyles
@@ -368,8 +377,6 @@ function DashboardContent() {
   const [aiPanelOpen, setAiPanelOpen] = useState(isAiMode);
   const [aiPickMode, setAiPickMode] = useState(false);
   const [aiTargetNodeId, setAiTargetNodeId] = useState<string | null>(null);
-  // Properties sidebar — independent of AI panel
-  const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(false);
   // Version history panel
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
@@ -383,6 +390,21 @@ function DashboardContent() {
 
   const { getIntersectingNodes, getNode } = useReactFlow();
   const viewport = useViewport();
+
+  useEffect(() => {
+    if (!storeCatalogId) return;
+
+    fetch("/api/my-works")
+      .then((response) => response.json())
+      .then((folders: ClientFolder[]) => {
+        if (!Array.isArray(folders)) return;
+        const currentFolder = folders.find((folder) =>
+          folder.catalogs.some((catalog) => catalog.id === storeCatalogId)
+        );
+        setClientName(currentFolder?.client_name ?? null);
+      })
+      .catch(() => setClientName(null));
+  }, [storeCatalogId]);
 
   // Load capabilities: Zustand first (if matching catalog), then DB fallback
   useEffect(() => {
@@ -493,6 +515,7 @@ function DashboardContent() {
     const handler = (e: KeyboardEvent) => {
       // Allow Ctrl+Z / Ctrl+Y even when an input/textarea has focus
       if (!canEditRef.current) return; // viewers cannot undo/redo
+      if (viewModeRef.current !== "editor") return; // presentation mode is read-only
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
         e.preventDefault();
         const stack = undoStackRef.current;
@@ -527,6 +550,7 @@ function DashboardContent() {
   const onNodeClick = useCallback(
     (evt: React.MouseEvent, node: Node<CapabilityNodeData>) => {
       if (node.type !== "capability") return;
+      if (viewModeRef.current !== "editor") return; // Present mode is fully static
       if (aiPickMode) {
         setAiTargetNodeId(node.id);
         return;
@@ -580,10 +604,12 @@ function DashboardContent() {
       const isSelected = selectedNodeIds.has(node.id);
       const isAiTarget = node.id === aiTargetNodeId;
       const level = node.data.level;
+      // Per-node `draggable` overrides ReactFlow's global `nodesDraggable`, so gate on viewMode too.
+      const canDragNode = viewMode === "editor" && canEdit && !aiPickMode && level >= 1;
       return {
         ...node,
         data: { ...node.data, ...styles, isSelected, pickMode: aiPickMode, isAiTarget },
-        draggable: aiPickMode ? false : level >= 1,
+        draggable: canDragNode,
         selected: false, // ReactFlow selection disabled — we manage highlight via data.isSelected
         // In pick mode: flatten all z-index to 1 so every level is equally clickable
         zIndex: aiPickMode ? 1 : (level === 0 ? -1 : level === 1 ? 0 : level === 2 ? 1 : 1000),
@@ -591,7 +617,7 @@ function DashboardContent() {
     });
 
     setNodes(nextNodes);
-  }, [capabilities, selectedNodeIds, aiTargetNodeId, aiPickMode, visibleLevels, nodeStyles]);
+  }, [capabilities, selectedNodeIds, aiTargetNodeId, aiPickMode, visibleLevels, nodeStyles, viewMode, canEdit]);
 
   const onNodeDragStart: NodeDragHandler = useCallback((_, node) => {
     setSelectedNodeId(node.id);
@@ -1107,13 +1133,12 @@ function DashboardContent() {
     },
     [storeCatalogId, setTagsStore]
   );
-  const handleAddTag = useCallback((tag: string) => {
-    if (tags.includes(tag)) return;
-    updateTags([...tags, tag]);
-  }, [tags, updateTags]);
-  const handleRemoveTag = useCallback((tag: string) => {
-    updateTags(tags.filter((t) => t !== tag));
-  }, [tags, updateTags]);
+  const handleSelectTag = useCallback((tag: string) => {
+    updateTags([tag]);
+  }, [updateTags]);
+  const handleClearTag = useCallback(() => {
+    updateTags([]);
+  }, [updateTags]);
 
   // Apply: bulk save to Supabase
   const handleApply = async () => {
@@ -1188,37 +1213,117 @@ function DashboardContent() {
     : "/export";
 
   return (
-    <div className="flex h-[calc(100vh-var(--navbar-height))] flex-col overflow-hidden bg-slate-50">
+    <div className={viewMode === "present" ? "fixed inset-0 z-50 flex h-screen flex-col overflow-hidden bg-white" : "flex h-[calc(100vh-var(--navbar-height))] flex-col overflow-hidden bg-slate-50"}>
       {/* Top bar with toolbar */}
-      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-2">
-        <div className="flex items-center gap-3">
-          <Link href="/" className="text-sm font-semibold text-brand-600 hover:underline">
-            ← Home
-          </Link>
-          <span className="text-xs text-slate-400">|</span>
-          <EditableDiagramName name={catalogName} canEdit={canEdit} onRename={handleRenameCatalog} />
-          <span className="shrink-0 whitespace-nowrap text-xs text-slate-400">
-            ({capabilities.length} capabilities)
+      <header className="relative z-30 flex min-h-16 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-2 lg:flex-nowrap">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          {viewMode === "editor" ? (
+            <>
+              <Link href="/" className="shrink-0 text-sm font-semibold text-brand-600 hover:underline">
+                ← Home
+              </Link>
+              <span className="text-xs text-slate-300">|</span>
+              <EditableDiagramName name={catalogName} canEdit={canEdit} onRename={handleRenameCatalog} />
+            </>
+          ) : (
+            <div className="min-w-0">
+              {clientName && <p className="truncate text-[10px] font-semibold uppercase text-slate-400">{clientName}</p>}
+              <h1 className="truncate text-base font-semibold text-slate-800">{catalogName || "Untitled diagram"}</h1>
+            </div>
+          )}
+          <span className="hidden shrink-0 whitespace-nowrap text-xs text-slate-400 sm:inline">
+            {capabilities.length} capabilities
           </span>
-          <DiagramTagsBar tags={tags} canEdit={canEdit} onAdd={handleAddTag} onRemove={handleRemoveTag} />
+          <div className={viewMode === "present" ? "block" : "hidden xl:block"}>
+            <DiagramTagsBar tag={tags[0] ?? null} canEdit={canEdit && viewMode === "editor"} onSelect={handleSelectTag} onClear={handleClearTag} />
+          </div>
         </div>
 
         {/* Toolbar in header */}
-        <div className="flex items-center gap-3">
-          <CanvasToolbar
-            interactionMode={interactionMode}
-            onModeChange={setInteractionMode}
-          />
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <CanvasToolbar />
+          {viewMode === "present" && (
+            <>
+              <div className="relative">
+                <button
+                  onClick={() => setPresentationPanel((panel) => panel === "levels" ? null : "levels")}
+                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-brand-300 hover:text-brand-600"
+                >
+                  Levels
+                </button>
+                {presentationPanel === "levels" && (
+                  <div className="absolute right-0 top-full z-40 mt-2 w-44 origin-top-right animate-dropdown-in rounded-md border border-slate-200 bg-white p-3 shadow-lg">
+                    {["Domain", "Group", "Subgroup", "Leaf"].map((label, level) => (
+                      <label key={label} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-xs text-slate-700 transition-colors duration-150 hover:bg-brand-50 hover:text-brand-700">
+                        <input type="checkbox" checked={visibleLevels.has(level)} onChange={() => onToggleLevel(level)} className="accent-brand-600" />
+                        L{level} — {label}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="relative">
+                <button
+                  onClick={() => setPresentationPanel((panel) => panel === "legend" ? null : "legend")}
+                  className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-brand-300 hover:text-brand-600"
+                >
+                  Legend
+                </button>
+                {presentationPanel === "legend" && (
+                  <div className="absolute right-0 top-full z-40 mt-2 max-h-[60vh] w-56 origin-top-right animate-dropdown-in overflow-y-auto rounded-md border border-slate-200 bg-white p-4 shadow-lg">
+                    {([
+                      ["Maturity levels", legend.fill],
+                      ["Border", legend.border],
+                      ["Text color", legend.textColor ?? []],
+                    ] as [string, LegendEntry[]][]).map(([title, entries]) => entries.length > 0 && (
+                      <div key={title} className="mb-4 last:mb-0">
+                        <p className="mb-2 text-[10px] font-semibold uppercase text-slate-400">{title}</p>
+                        <div className="space-y-1.5">
+                          {entries.map((entry) => (
+                            <div key={entry.id} className="flex items-center gap-2 text-xs text-slate-700">
+                              <span className="h-3 w-3 shrink-0 rounded-sm border border-slate-200" style={{ background: entry.color }} />
+                              <span className="truncate">{entry.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+          <div className="flex rounded-md border border-slate-200 bg-slate-50 p-0.5">
+            <button
+              onClick={() => { setViewMode("editor"); setPresentationPanel(null); }}
+              className={`rounded px-3 py-1 text-xs font-semibold transition-colors duration-150 ${viewMode === "editor" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:bg-white/60 hover:text-slate-700"}`}
+            >
+              Editor
+            </button>
+            <button
+              onClick={() => {
+                setViewMode("present");
+                setMoreMenuOpen(false);
+                setAiPanelOpen(false);
+                setHistoryPanelOpen(false);
+                setSelectedNodeId(null);
+                setSelectedNodeIds(new Set());
+              }}
+              className={`rounded px-3 py-1 text-xs font-semibold transition-colors duration-150 ${viewMode === "present" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:bg-white/60 hover:text-slate-700"}`}
+            >
+              Present
+            </button>
+          </div>
 
           {/* View-only badge */}
-          {userRole === "viewer" && (
+          {viewMode === "editor" && userRole === "viewer" && (
             <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[11px] font-medium text-slate-500">
               View only
             </span>
           )}
 
           {/* Undo / Redo buttons — editors/admins only */}
-          {canEdit && (
+          {viewMode === "editor" && canEdit && (
             <div className="flex items-center gap-1">
               <button
                 onClick={() => {
@@ -1260,80 +1365,12 @@ function DashboardContent() {
               </button>
             </div>
           )}
-          {applyError && (
+          {viewMode === "editor" && applyError && (
             <p className="text-xs text-red-500">{applyError}</p>
           )}
 
-          {/* Use template — editors/admins only */}
-          {canEdit && (
-            <button
-              onClick={() => setUseTemplateOpen(true)}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-brand-400 hover:text-brand-600"
-              title="Load a saved template onto the canvas"
-            >
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" />
-              </svg>
-              Use template
-            </button>
-          )}
-
-          {/* Save as Template — editors/admins only */}
-          {canEdit && (
-            <button
-              onClick={() => setSaveTemplateOpen(true)}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-amber-400 hover:text-amber-600"
-              title="Save current diagram as a reusable template"
-            >
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
-              </svg>
-              Save as template
-            </button>
-          )}
-
-          {/* AI map editor toggle — editors/admins only */}
-          {canEdit && (
-            <button
-              onClick={() => {
-                setAiPanelOpen((v) => {
-                  if (!v) { setSelectedNodeId(null); setSelectedNodeIds(new Set()); }
-                  setPropertiesPanelOpen(false);
-                  return !v;
-                });
-              }}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition ${
-                aiPanelOpen
-                  ? "border-blue-500 bg-blue-500 text-white"
-                  : "border-slate-200 bg-white text-slate-700 hover:border-blue-400 hover:text-blue-600"
-              }`}
-            >
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-              </svg>
-              AI map editor
-            </button>
-          )}
-
-          {/* Properties panel toggle — editors/admins only */}
-          {canEdit && (
-            <button
-              onClick={() => { setPropertiesPanelOpen((v) => !v); setAiPanelOpen(false); }}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition ${
-                propertiesPanelOpen
-                  ? "border-indigo-500 bg-indigo-500 text-white"
-                  : "border-slate-200 bg-white text-slate-700 hover:border-indigo-400 hover:text-indigo-600"
-              }`}
-            >
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
-              </svg>
-              Properties
-            </button>
-          )}
-
           {/* Apply / Save — editors/admins only */}
-          {canEdit && (
+          {viewMode === "editor" && canEdit && (
             <button
               onClick={handleApply}
               disabled={applying || !isDirty}
@@ -1359,50 +1396,57 @@ function DashboardContent() {
             </button>
           )}
 
-          <Link
-            href={exportHref}
-            className="rounded-lg bg-brand-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-700"
-          >
-            Export
-          </Link>
-          {/* Version history toggle — only shown after first save */}
-          {storeCatalogId && (
-            <button
-              onClick={() => {
-                setHistoryPanelOpen((v) => !v);
-                setAiPanelOpen(false);
-                setPropertiesPanelOpen(false);
-              }}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition ${
-                historyPanelOpen
-                  ? "border-violet-500 bg-violet-500 text-white"
-                  : "border-slate-200 bg-white text-slate-700 hover:border-violet-400 hover:text-violet-600"
-              }`}
+          {viewMode === "editor" && (
+            <Link
+              href={exportHref}
+              className="rounded-lg bg-brand-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-700"
             >
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              History
-            </button>
+              Export
+            </Link>
           )}
-          {/* Diagram notes — only shown after first save */}
-          {storeCatalogId && (
-            <button
-              onClick={() => setNotesOpen(true)}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-amber-400 hover:text-amber-600"
-            >
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487a2.1 2.1 0 1 1 2.97 2.97L7.5 19.79l-4 1 1-4 12.362-12.303Z" />
-              </svg>
-              Notes
-            </button>
+          {viewMode === "editor" && (
+            <div className="relative">
+              <button
+                onClick={() => setMoreMenuOpen((open) => !open)}
+                aria-label="More diagram actions"
+                title="More actions"
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                  <circle cx="5" cy="12" r="1.5" />
+                  <circle cx="12" cy="12" r="1.5" />
+                  <circle cx="19" cy="12" r="1.5" />
+                </svg>
+              </button>
+              {moreMenuOpen && (
+                <>
+                  <button className="fixed inset-0 z-30 cursor-default" onClick={() => setMoreMenuOpen(false)} aria-label="Close menu" />
+                  <div className="absolute right-0 top-full z-40 mt-2 w-48 origin-top-right animate-dropdown-in rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+                    {canEdit && (
+                      <>
+                        <button onClick={() => { setUseTemplateOpen(true); setMoreMenuOpen(false); }} className="block w-full px-3 py-2 text-left text-xs text-slate-700 transition-all duration-150 hover:translate-x-0.5 hover:bg-brand-50 hover:text-brand-700">Use template</button>
+                        <button onClick={() => { setSaveTemplateOpen(true); setMoreMenuOpen(false); }} className="block w-full px-3 py-2 text-left text-xs text-slate-700 transition-all duration-150 hover:translate-x-0.5 hover:bg-brand-50 hover:text-brand-700">Save as template</button>
+                      </>
+                    )}
+                    {storeCatalogId && (
+                      <>
+                        <button onClick={() => { setHistoryPanelOpen((open) => !open); setAiPanelOpen(false); setMoreMenuOpen(false); }} className="block w-full px-3 py-2 text-left text-xs text-slate-700 transition-all duration-150 hover:translate-x-0.5 hover:bg-brand-50 hover:text-brand-700">Version history</button>
+                        <button onClick={() => { setNotesOpen(true); setMoreMenuOpen(false); }} className="block w-full px-3 py-2 text-left text-xs text-slate-700 transition-all duration-150 hover:translate-x-0.5 hover:bg-brand-50 hover:text-brand-700">Diagram notes</button>
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
           )}
         </div>
       </header>
 
       {/* Body: left sidebar + canvas + right sidebar */}
       <div className="flex flex-1 overflow-hidden">
-        <LeftSidebar visibleLevels={visibleLevels} onToggleLevel={onToggleLevel} onAddNode={canEdit ? () => setAddNodeOpen(true) : undefined} />
+        {viewMode === "editor" && (
+          <LeftSidebar visibleLevels={visibleLevels} onToggleLevel={onToggleLevel} onAddNode={canEdit ? () => setAddNodeOpen(true) : undefined} />
+        )}
 
         {/* Canvas area */}
         <div className="relative flex-1 overflow-auto">
@@ -1412,11 +1456,11 @@ function DashboardContent() {
             nodeTypes={NODE_TYPES}
             onNodesChange={onNodesChange}
             onNodeClick={onNodeClick}
-            onNodeDragStart={canEdit ? onNodeDragStart : undefined}
-            onNodeDrag={canEdit ? onNodeDrag : undefined}
-            onNodeDragStop={canEdit ? onNodeDragStop : undefined}
+            onNodeDragStart={canEdit && viewMode === "editor" ? onNodeDragStart : undefined}
+            onNodeDrag={canEdit && viewMode === "editor" ? onNodeDrag : undefined}
+            onNodeDragStop={canEdit && viewMode === "editor" ? onNodeDragStop : undefined}
             onPaneClick={onPaneClick}
-            nodesDraggable={canEdit}
+            nodesDraggable={canEdit && viewMode === "editor"}
             panOnDrag={true}
             panOnScroll={true}
             panOnScrollMode={"free" as import("reactflow").PanOnScrollMode}
@@ -1430,7 +1474,7 @@ function DashboardContent() {
             <Background gap={20} size={1} color="#e2e8f0" />
 
             {/* Drop indicator */}
-            {canEdit && dropIndicator && (
+            {canEdit && viewMode === "editor" && dropIndicator && (
               <div
                 style={{
                   position: "absolute",
@@ -1483,8 +1527,26 @@ function DashboardContent() {
             )}
           </ReactFlow>
 
+          {viewMode === "editor" && canEdit && !aiPanelOpen && (
+            <button
+              onClick={() => {
+                setSelectedNodeId(null);
+                setSelectedNodeIds(new Set());
+                setAiPanelOpen(true);
+              }}
+              className="ask-ai-btn group absolute bottom-4 right-4 z-20 flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold text-white shadow-lg transition-transform duration-200 hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2"
+            >
+              <span className="ask-ai-glow" aria-hidden="true" />
+              <span className="ask-ai-shine" aria-hidden="true" />
+              <svg className="ask-ai-sparkle h-4 w-4 relative" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+              </svg>
+              <span className="relative">Ask AI</span>
+            </button>
+          )}
+
           {/* Add Node wizard — editors/admins only */}
-          {canEdit && (
+          {canEdit && viewMode === "editor" && (
             <AddNodeWizard
               open={addNodeOpen}
               onClose={() => setAddNodeOpen(false)}
@@ -1497,7 +1559,7 @@ function DashboardContent() {
           )}
 
           {/* AI Map Editor panel — editors/admins only */}
-          {canEdit && (
+          {canEdit && viewMode === "editor" && (
             <AIMapEditor
               open={aiPanelOpen}
               onClose={() => {
@@ -1522,7 +1584,7 @@ function DashboardContent() {
         </div>
 
         {/* Properties sidebar — single or multi-select (editors/admins only) */}
-        {canEdit && selectedNodeIds.size >= 1 && !aiPanelOpen && (
+        {viewMode === "editor" && canEdit && selectedNodeIds.size >= 1 && !aiPanelOpen && (
           <div className="relative flex flex-shrink-0">
             <button
               onClick={() => { setSelectedNodeId(null); setSelectedNodeIds(new Set()); }}
@@ -1630,7 +1692,7 @@ function DashboardContent() {
         )}
 
         {/* Version History sidebar */}
-        {historyPanelOpen && (
+        {viewMode === "editor" && historyPanelOpen && (
           <aside className="flex w-72 flex-shrink-0 flex-col overflow-hidden border-l border-slate-200 bg-white">
             <VersionHistoryPanel
               key={historyKey}
